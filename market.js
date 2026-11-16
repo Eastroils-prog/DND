@@ -56,7 +56,13 @@
     { id: 'lamp-oil', name: 'Lamp oil', unit: 'per flask', cat: 'Goods & Mounts', base: 10, war: 1.6, lag: 5, vol: 0.018, season: 0.1, phase: 3.1 },
     { id: 'cloth', name: 'Cloth, common', unit: 'per yard', cat: 'Goods & Mounts', base: 10, war: 1.3, lag: 9, vol: 0.012 },
   ];
-  const CATS = ['All', ...new Set(ITEMS.map(i => i.cat))];
+  const allItems = () => ITEMS.concat(ms.customItems || []);
+  const cats = () => ['All', ...new Set(allItems().map(i => i.cat))];
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // choices for the "add your own item" form
+  const WAR_CHOICES = [[0.7, 'Gets much cheaper'], [0.85, 'Gets a bit cheaper'], [1, 'No change'], [1.3, 'A bit more expensive'],
+    [1.7, 'More expensive'], [2.5, 'Much more expensive'], [3.5, 'Way more expensive (war goods)']];
+  const VOL_CHOICES = [[0.008, 'Very stable'], [0.016, 'Normal'], [0.03, 'Jumpy'], [0.05, 'Wild swings']];
 
   const WAR_LEVELS = [
     { v: 0, label: '🕊️ Peace' },
@@ -97,11 +103,19 @@
       seed: 1337,
       daysAdvanced: 0,
       events: [{ day: HISTORY_DAYS - 1 - WAR_DAYS_AGO, level: 1 }],
+      customItems: [],
+      cityId: null,
     };
   }
   let ms;
   function loadM() {
-    try { const s = JSON.parse(localStorage.getItem(MKEY)); if (s && Array.isArray(s.events)) return s; } catch (e) { /* ignore */ }
+    try {
+      const s = JSON.parse(localStorage.getItem(MKEY));
+      if (s && Array.isArray(s.events)) {
+        s.customItems = (Array.isArray(s.customItems) ? s.customItems : []).filter(i => i && i.id && i.base > 0 && i.war > 0);
+        return s;
+      }
+    } catch (e) { /* ignore */ }
     return defaultMState();
   }
   function saveM() { try { localStorage.setItem(MKEY, JSON.stringify(ms)); } catch (e) { /* ignore */ } }
@@ -126,7 +140,9 @@
     const n = totalDays();
     const levels = Array.from({ length: n }, (_, d) => levelAt(d));
     const out = {};
-    for (const it of ITEMS) {
+    const city = currentCity();
+    const priceMod = city ? (Number(city.priceMod) || 1) : 1, expo = city ? (Number(city.warExposure) || 1) : 1;
+    for (const it of allItems()) {
       const r = mulberry32(hashStr(it.id) ^ ms.seed);
       const logBase = Math.log(it.base);
       let x = logBase, e = 0;
@@ -140,11 +156,17 @@
         const target = logBase + season + inflation + harvest + e;
         const volMult = 1 + 1.5 * Math.min(1, lv);
         x += 0.08 * (target - x) + it.vol * volMult * gauss(r);
-        arr[d] = Math.exp(x);
+        // local prices: the city's price level, and how hard the war hits that place
+        arr[d] = Math.exp(x + e * (expo - 1)) * priceMod;
       }
       out[it.id] = arr;
     }
     cache = out;
+  }
+
+  function currentCity() {
+    const locs = window.World ? window.World.locations() : [];
+    return locs.find(l => l.id === ms.cityId) || null;
   }
 
   // ---------- live ticking ----------
@@ -153,7 +175,7 @@
   function livePrice(id) { return cache[id][today()] * Math.exp(live[id] || 0); }
   function tick() {
     const lv = levelAt(today());
-    for (const it of ITEMS) {
+    for (const it of allItems()) {
       const o = live[it.id] || 0;
       // tiny wobble; during war prices drift upward a little through the day
       const drift = (it.war > 1 ? 0.0006 : -0.0003) * lv;
@@ -254,6 +276,13 @@
     return { X, pad, n, w };
   }
 
+  function cityDesc(c) {
+    const pm = Number(c.priceMod) || 1, ex = Number(c.warExposure) || 1;
+    const p = pm >= 1.5 ? 'very expensive' : pm >= 1.25 ? 'expensive' : pm > 1 ? 'a bit pricey' : pm < 0.8 ? 'very cheap' : pm < 1 ? 'cheap' : 'normal prices';
+    const w = ex >= 1.6 ? 'on the front line' : ex > 1 ? 'near the war' : ex <= 0.3 ? 'untouched by the war' : ex < 1 ? 'far from the war' : 'normal war effect';
+    return `${p}, ${w}`;
+  }
+
   // ---------- news headlines ----------
   function headlines() {
     const lv = levelAt(today()), fw = firstWarDay();
@@ -274,6 +303,9 @@
     } else {
       list.push('Peace in the realm. Trade roads are open and prices are calm.');
     }
+    const c = currentCity();
+    if (c && lv > 0 && Number(c.warExposure) >= 1.6) list.unshift(`Soldiers fill the streets of ${esc(c.name)}. Everything here costs far more than elsewhere.`);
+    if (c && lv > 0 && Number(c.warExposure) <= 0.6) list.unshift(`In ${esc(c.name)} the war feels far away. Prices have hardly moved.`);
     if (lv >= 1.5) list.unshift('⚠️ Enemy banners seen from the walls! Panic buying everywhere.');
     list.push('Last year\'s bad harvest is still remembered — bakers keep a close eye on the grain price.');
     return list;
@@ -295,13 +327,20 @@
     const fw = firstWarDay();
     const levelLabel = (WAR_LEVELS.find(l => l.v === (ms.events[ms.events.length - 1] || {}).level) || WAR_LEVELS[0]).label;
     const atWar = lv > 0;
+    const city = currentCity();
     root.innerHTML = `
       <div class="war-banner ${atWar ? '' : 'peace'}">
         <div>
           <div class="title">${atWar && fw !== null ? `⚔️ The war began ${today() - fw} days ago` : '🕊️ The realm is at peace'}</div>
+          ${city ? `<div class="small" style="color:#ffd3c4">📍 Prices in <b>${esc(city.name)}</b> — ${esc(cityDesc(city))}</div>` : ''}
           <div class="small muted">Status: ${levelLabel} · Market day ${today() - (HISTORY_DAYS - 1) >= 0 ? '+' + (today() - (HISTORY_DAYS - 1)) : ''} · <span class="live-dot ${liveOn ? '' : 'off'}"></span>${liveOn ? 'LIVE prices' : 'Paused'}</div>
         </div>
         <div class="row" style="flex:0 1 auto">
+          <select id="citySel" title="Prices are different in every place" style="width:auto;max-width:220px">
+            <option value="">📍 Standard prices (rulebook)</option>
+            ${(window.World ? window.World.locations() : []).slice().sort((a, b) => a.name.localeCompare(b.name))
+              .map(l => `<option value="${esc(l.id)}" ${l.id === ms.cityId ? 'selected' : ''}>📍 ${esc(l.name)}</option>`).join('')}
+          </select>
           <select id="warLevel" title="Change the war status from today onward" style="width:auto">
             ${WAR_LEVELS.map(l => `<option value="${l.v}">${l.label}</option>`).join('')}
           </select>
@@ -313,10 +352,10 @@
 
       <div class="panel chart-panel" id="chartPanel"></div>
 
-      <div class="split" style="grid-template-columns: 1fr 320px">
+      <div class="split market-split">
         <div>
           <div class="cat-chips" id="catChips">
-            ${CATS.map(c => `<button class="btn small ${c === cat ? 'on' : ''}" data-cat="${c}">${c}</button>`).join('')}
+            ${cats().map(c => `<button class="btn small ${c === cat ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
           </div>
           <div class="market-grid" id="mgrid"></div>
         </div>
@@ -325,6 +364,21 @@
           <ul class="news">${headlines().map(h => `<li>${h}</li>`).join('')}</ul>
           <p class="small muted" style="margin-top:12px">Prices are in gold (gp), silver (sp) and copper (cp).
           ▲ red = more expensive, ▼ green = cheaper. Hover the big chart to see the price on any day.</p>
+          <hr style="border-color:var(--line);margin:16px 0">
+          <h3>✨ Add your own item</h3>
+          <form id="itemForm" class="stack" autocomplete="off">
+            <div><label>Name *</label><input name="name" required maxlength="50" placeholder="e.g. Dragon scale"></div>
+            <div class="row">
+              <div style="flex:2 1 90px"><label>Normal price *</label><input name="price" type="number" min="0.1" max="1000000" step="any" required placeholder="10"></div>
+              <div style="flex:1 1 70px"><label>Coin</label><select name="coin"><option value="100">gp</option><option value="10">sp</option><option value="1">cp</option></select></div>
+            </div>
+            <div><label>Sold…</label><input name="unit" maxlength="30" placeholder="e.g. each, per pound, per night"></div>
+            <div><label>Category</label><input name="cat" maxlength="30" list="catList" placeholder="e.g. Magic Items">
+              <datalist id="catList">${cats().filter(c => c !== 'All').map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
+            <div><label>What does the war do to it?</label><select name="war">${WAR_CHOICES.map(([v, l]) => `<option value="${v}" ${v === 1.3 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div><label>How jumpy is the price?</label><select name="vol">${VOL_CHOICES.map(([v, l]) => `<option value="${v}" ${v === 0.016 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <button class="btn primary" type="submit">+ Add to market</button>
+          </form>
         </aside>
       </div>`;
     const sel = root.querySelector('#warLevel');
@@ -339,6 +393,22 @@
       saveM(); render(root);
       window.toast && window.toast('War status updated — prices will react over the coming days.');
     };
+    root.querySelector('#citySel').onchange = e => {
+      ms.cityId = e.target.value || null; saveM(); for (const k in live) live[k] = 0; render(root);
+    };
+    root.querySelector('#itemForm').onsubmit = e => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target).entries());
+      const name = String(f.name).trim(), base = parseFloat(f.price) * parseInt(f.coin, 10);
+      if (!name) return window.toast && window.toast('Your item needs a name!');
+      if (!(base > 0) || base > 1e8) return window.toast && window.toast('Please type a sensible price.');
+      const war = parseFloat(f.war), vol = parseFloat(f.vol);
+      const it = { id: 'c-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), custom: true, name,
+        unit: String(f.unit).trim() || 'each', cat: String(f.cat).trim() || 'My Items', base,
+        war: war > 0 ? war : 1, vol: vol > 0 ? vol : 0.016, lag: 5 };
+      ms.customItems.push(it); selected = it.id; cat = 'All'; saveM(); render(root);
+      window.toast && window.toast(`✨ ${name} is now sold at the market!`);
+    };
     root.querySelector('#liveBtn').onclick = () => { liveOn = !liveOn; startLive(); render(root); };
     root.querySelector('#endDay').onclick = () => {
       ms.daysAdvanced++; for (const k in live) live[k] = 0; saveM(); render(root);
@@ -350,14 +420,15 @@
 
   function renderChartPanel() {
     const panel = root.querySelector('#chartPanel'); if (!panel) return;
-    const it = ITEMS.find(i => i.id === selected);
+    if (!cache[selected]) selected = 'potion-healing';
+    const it = allItems().find(i => i.id === selected);
     const all = cache[it.id], t = today(), now = livePrice(it.id), fw = firstWarDay();
     const prewar = fw !== null ? all[Math.max(0, fw - 1)] : all[Math.max(0, t - 14)];
     const hist = all.slice(Math.max(0, t - 729), t);
     panel.innerHTML = `
       <div class="chart-head">
         <div>
-          <h2 style="margin:0">${it.name} <span class="muted small">(${it.unit})</span></h2>
+          <h2 style="margin:0">${esc(it.name)} <span class="muted small">(${esc(it.unit)})</span></h2>
           <div class="big-price" id="bigPrice">${formatCoins(now)}</div>
           <div class="small">${pctHtml(pct(now, all[t - 1]))} today · ${pctHtml(pct(now, prewar))} since the war began</div>
         </div>
@@ -395,15 +466,24 @@
   function renderGrid() {
     const grid = root.querySelector('#mgrid'); if (!grid) return;
     const t = today(), fw = firstWarDay();
-    const items = ITEMS.filter(i => cat === 'All' || i.cat === cat);
+    if (!cats().includes(cat)) cat = 'All';
+    const items = allItems().filter(i => cat === 'All' || i.cat === cat);
     grid.innerHTML = items.map(it => `
       <div class="mcard ${it.id === selected ? 'sel' : ''}" data-id="${it.id}">
-        <div class="nm">${it.name}</div>
-        <div class="unit">${it.unit} · ${it.cat}</div>
+        <div class="nm">${esc(it.name)}${it.custom ? ` <button class="btn-x" title="Delete your item" data-delitem="${it.id}">🗑</button>` : ''}</div>
+        <div class="unit">${esc(it.unit)} · ${esc(it.cat)}${it.custom ? ' · ✨ yours' : ''}</div>
         <div class="pr" data-price="${it.id}">${formatCoins(livePrice(it.id))}</div>
         <div class="small" data-chg="${it.id}"></div>
         <canvas data-spark="${it.id}"></canvas>
       </div>`).join('');
+    grid.querySelectorAll('[data-delitem]').forEach(b => b.onclick = e => {
+      e.stopPropagation();
+      const it = allItems().find(i => i.id === b.dataset.delitem);
+      if (!confirm(`Delete "${it.name}" from the market?`)) return;
+      ms.customItems = ms.customItems.filter(i => i.id !== it.id); delete live[it.id];
+      if (selected === it.id) selected = 'potion-healing';
+      saveM(); render(root);
+    });
     grid.querySelectorAll('.mcard').forEach(c => c.onclick = () => {
       selected = c.dataset.id; hoverIdx = null;
       grid.querySelectorAll('.mcard').forEach(x => x.classList.toggle('sel', x === c));
@@ -421,7 +501,7 @@
   function updateLiveNumbers(flash) {
     if (!root) return;
     const t = today(), fw = firstWarDay();
-    for (const it of ITEMS) {
+    for (const it of allItems()) {
       const el = root.querySelector(`[data-price="${it.id}"]`); if (!el) continue;
       const p = livePrice(it.id), old = parseFloat(el.dataset.v || p);
       el.textContent = formatCoins(p); el.dataset.v = p;
@@ -446,9 +526,10 @@
   }
 
   function stop() { clearInterval(timer); root = null; }
-  function reset() { ms = defaultMState(); saveM(); for (const k in live) live[k] = 0; }
+  function reset() { const keep = { customItems: ms.customItems, cityId: ms.cityId }; ms = { ...defaultMState(), ...keep }; saveM(); for (const k in live) live[k] = 0; }
+  function setCity(id) { ms.cityId = id || null; saveM(); }
 
   window.addEventListener('resize', () => { if (root && root.querySelector('#mgrid')) { drawBig(); renderGrid(); } });
 
-  window.Market = { render, stop, reset, formatCoins, items: ITEMS, _state: () => ms };
+  window.Market = { render, stop, reset, setCity, formatCoins, items: allItems, _state: () => ms };
 })();

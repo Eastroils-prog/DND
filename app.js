@@ -8,6 +8,20 @@
   const ALIGNMENTS = ['Lawful Good', 'Neutral Good', 'Chaotic Good', 'Lawful Neutral', 'True Neutral', 'Chaotic Neutral', 'Lawful Evil', 'Neutral Evil', 'Chaotic Evil', 'Unknown'];
   const STATUSES = ['Alive', 'Dead', 'Missing', 'Unknown'];
   const LOC_TYPES = ['City', 'Town', 'Village', 'Tavern / Inn', 'Castle / Keep', 'Temple', 'Shop', 'Dungeon', 'Wilderness', 'Other'];
+  // Relationship types. Left = what the OTHER person is to this NPC. Right = the opposite direction.
+  const BONDS = {
+    'Friend': 'Friend', 'Best friend': 'Best friend', 'Rival': 'Rival', 'Enemy': 'Enemy', 'Lover': 'Lover', 'Ally': 'Ally',
+    'Business partner': 'Business partner', 'Employer': 'Employee', 'Employee': 'Employer', 'Mentor': 'Student', 'Student': 'Mentor',
+    'Owes money to them': 'Is owed money by them', 'Is owed money by them': 'Owes money to them', 'Secretly hates': 'Is secretly hated by',
+    'Is secretly hated by': 'Secretly hates',
+  };
+  const BAD_BONDS = ['Rival', 'Enemy', 'Secretly hates', 'Is secretly hated by'];
+  const FACTION_TYPES = ['Guild', 'Noble house', 'Cult', 'Army / military', 'Thieves guild', 'Church / temple', 'Merchant company', 'Secret society', 'Adventuring party', 'Other'];
+  const PRICE_LEVELS = [[0.75, 'Very cheap'], [0.9, 'Cheap'], [1, 'Normal'], [1.15, 'Pricey'], [1.3, 'Expensive'], [1.6, 'Very expensive']];
+  const EXPOSURE = [[1.7, 'Front line ⚔️'], [1.3, 'Near the war'], [1, 'Normal'], [0.6, 'Far from the war'], [0.2, 'Untouched by the war']];
+  const labelOf = (list, v) => (list.find(([x]) => x === Number(v)) || [v, 'Normal'])[1];
+  const numOpts = (list, cur) => list.map(([v, l]) => `<option value="${v}" ${Number(cur) === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const safeImg = s => (typeof s === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(s)) ? s : '';
 
   // ---------- helpers ----------
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -26,12 +40,13 @@
 
   // ---------- data ----------
   function sampleWorld() {
-    const L = (name, type, region, notes) => ({ id: uid(), name, type, region, notes });
-    const oak = L('Oakvale', 'Village', 'The Green Marches', 'A quiet farming village near the border. Now full of refugees.');
-    const inn = L('The Prancing Griffin', 'Tavern / Inn', 'Oakvale', 'Best (and only) inn in Oakvale.');
-    const keep = L('Stonewatch Keep', 'Castle / Keep', 'The Green Marches', 'Border fortress. The war started here.');
+    const L = (name, type, region, notes, priceMod = 1, warExposure = 1) => ({ id: uid(), name, type, region, notes, priceMod, warExposure });
+    const oak = L('Oakvale', 'Village', 'The Green Marches', 'A quiet farming village near the border. Now full of refugees.', 0.9, 1.3);
+    const inn = L('The Prancing Griffin', 'Tavern / Inn', 'Oakvale', 'Best (and only) inn in Oakvale.', 1, 1.3);
+    const keep = L('Stonewatch Keep', 'Castle / Keep', 'The Green Marches', 'Border fortress. The war started here.', 1.3, 1.7);
+    const port = L('Saltmere', 'City', 'The Southern Coast', 'Rich trading port far from the fighting.', 1.15, 0.6);
     const N = (o) => ({ id: uid(), race: 'Human', gender: '', age: '', occupation: '', alignment: 'True Neutral', status: 'Alive',
-      description: '', notes: '', parents: [], spouses: [], siblings: [], locationId: null, ...o });
+      description: '', notes: '', parents: [], spouses: [], siblings: [], bonds: [], factions: [], portrait: '', locationId: null, ...o });
     const durgan = N({ name: 'Old Durgan Ironfoot', race: 'Dwarf', gender: 'Male', age: '312', occupation: 'Retired blacksmith', status: 'Dead', locationId: oak.id, description: 'Founded the Ironfoot forge.' });
     const brom = N({ name: 'Brom Ironfoot', race: 'Dwarf', gender: 'Male', age: '160', occupation: 'Blacksmith', alignment: 'Lawful Good', locationId: oak.id, description: 'Gruff but kind. Working day and night making swords for the war.', notes: 'Secretly sells weapons to both sides.' });
     const hilda = N({ name: 'Hilda Ironfoot', race: 'Dwarf', gender: 'Female', age: '150', occupation: 'Brewer', alignment: 'Neutral Good', locationId: inn.id, description: 'Brews the strongest beer in the Marches.' });
@@ -41,14 +56,33 @@
     brom.parents = [durgan.id];
     brom.spouses = [hilda.id]; hilda.spouses = [brom.id];
     torin.parents = [brom.id, hilda.id]; mara.parents = [brom.id, hilda.id];
-    return { version: 1, locations: [oak, inn, keep], npcs: [durgan, brom, hilda, torin, mara, elsa] };
+    const vex = N({ name: 'Lord Aldric Vex', gender: 'Male', age: '52', occupation: 'Grain merchant', alignment: 'Neutral Evil', locationId: port.id,
+      description: 'Smiling, perfumed, always counting.', notes: 'Is hoarding grain to drive up the price of bread during the war.' });
+    const smiths = { id: uid(), name: 'The Iron Brotherhood', type: 'Guild', color: '#c98a3d', hqId: oak.id, goals: 'Keep the forges burning and the prices fair.', notes: '' };
+    const eyes = { id: uid(), name: "The Queen's Eyes", type: 'Secret society', color: '#7a6ad8', hqId: null, goals: 'Watch everyone. Report everything.', notes: 'Nobody knows who leads it.' };
+    const guild = { id: uid(), name: 'Saltmere Trading Company', type: 'Merchant company', color: '#3d9a8b', hqId: port.id, goals: 'Profit from the war.', notes: '' };
+    brom.factions = [{ id: smiths.id, rank: 'Guildmaster' }]; mara.factions = [{ id: smiths.id, rank: 'Apprentice' }];
+    elsa.factions = [{ id: eyes.id, rank: 'Agent' }]; vex.factions = [{ id: guild.id, rank: 'Senior partner' }];
+    const world = { version: 2, locations: [oak, inn, keep, port], factions: [smiths, eyes, guild], npcs: [durgan, brom, hilda, torin, mara, elsa, vex] };
+    const link = (a, t, b) => { a.bonds.push({ id: b.id, type: t, note: '' }); b.bonds.push({ id: a.id, type: BONDS[t], note: '' }); };
+    link(elsa, 'Best friend', hilda); link(mara, 'Mentor', brom); link(brom, 'Enemy', vex); link(elsa, 'Secretly hates', vex);
+    return world;
   }
   function normalize(s) {
     if (!s || typeof s !== 'object') return sampleWorld();
-    s.locations = Array.isArray(s.locations) ? s.locations.filter(l => l && l.id) : [];
-    s.npcs = (Array.isArray(s.npcs) ? s.npcs : []).filter(n => n && n.id).map(n => ({
-      parents: [], spouses: [], siblings: [], ...n,
+    s.locations = (Array.isArray(s.locations) ? s.locations : []).filter(l => l && l.id).map(l => ({
+      priceMod: 1, warExposure: 1, ...l,
     }));
+    s.factions = (Array.isArray(s.factions) ? s.factions : []).filter(f => f && f.id).map(f => ({ color: '#c98a3d', goals: '', notes: '', hqId: null, ...f }));
+    s.npcs = (Array.isArray(s.npcs) ? s.npcs : []).filter(n => n && n.id).map(n => ({
+      parents: [], spouses: [], siblings: [], bonds: [], factions: [], ...n,
+    }));
+    s.npcs.forEach(n => {
+      n.portrait = safeImg(n.portrait);
+      n.bonds = n.bonds.filter(b => b && BONDS[b.type]);
+      n.factions = n.factions.filter(f => f && f.id);
+    });
+    s.factions.forEach(f => { if (!/^#[0-9a-fA-F]{6}$/.test(f.color)) f.color = '#c98a3d'; });
     return s;
   }
   function load() {
@@ -109,19 +143,96 @@
   }
   function deleteNpc(id) {
     state.npcs = state.npcs.filter(n => n.id !== id);
-    state.npcs.forEach(n => { remove(n.parents, id); remove(n.spouses, id); remove(n.siblings, id); });
+    state.npcs.forEach(n => { remove(n.parents, id); remove(n.spouses, id); remove(n.siblings, id); n.bonds = n.bonds.filter(b => b.id !== id); });
     save();
+  }
+  const faction = id => state.factions.find(f => f.id === id);
+  function addBond(aId, type, bId, note) {
+    const a = npc(aId), b = npc(bId);
+    if (!a || !b) return 'Pick someone first.';
+    if (aId === bId) return "An NPC can't have a relationship with themselves!";
+    if (!BONDS[type]) return 'Unknown relationship type.';
+    a.bonds = a.bonds.filter(x => !(x.id === bId && x.type === type));
+    b.bonds = b.bonds.filter(x => !(x.id === aId && x.type === BONDS[type]));
+    a.bonds.push({ id: bId, type, note }); b.bonds.push({ id: aId, type: BONDS[type], note });
+    save(); return null;
+  }
+  function removeBond(aId, type, bId) {
+    const a = npc(aId), b = npc(bId);
+    if (a) a.bonds = a.bonds.filter(x => !(x.id === bId && x.type === type));
+    if (b) b.bonds = b.bonds.filter(x => !(x.id === aId && x.type === BONDS[type]));
+    save();
+  }
+  const membersOf = fid => state.npcs.filter(n => n.factions.some(f => f.id === fid));
+  const rankIn = (n, fid) => (n.factions.find(f => f.id === fid) || {}).rank || '';
+  function joinFaction(nId, fId, rank) {
+    const n = npc(nId); if (!n || !faction(fId)) return 'Pick a faction first.';
+    n.factions = n.factions.filter(f => f.id !== fId); n.factions.push({ id: fId, rank: rank || 'Member' });
+    save(); return null;
+  }
+  function leaveFaction(nId, fId) { const n = npc(nId); if (n) { n.factions = n.factions.filter(f => f.id !== fId); save(); } }
+
+  // ---------- portraits: shrink the picture so it fits in browser storage ----------
+  function readPortrait(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !file.type.startsWith('image/')) return reject(new Error('not an image'));
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => {
+        const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+        const side = Math.min(img.width, img.height); // crop to a square from the middle
+        c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2.6, side, side, 0, 0, S, S);
+        URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+      img.src = url;
+    });
+  }
+  const avatar = (n, size = 36) => n.portrait
+    ? `<img class="avatar" src="${esc(n.portrait)}" alt="" style="width:${size}px;height:${size}px">`
+    : `<span class="avatar ph" style="width:${size}px;height:${size}px;font-size:${size * 0.45}px">${esc((n.name || '?').trim()[0] || '?')}</span>`;
+
+  // ---------- printable NPC cards ----------
+  function printNpcs(list, withSecrets) {
+    if (!list.length) return toast('Nobody to print.');
+    let area = $('#printArea');
+    if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+    area.innerHTML = list.map(n => {
+      const l = loc(n.locationId);
+      const fam = [
+        ['Parents', n.parents.map(npc).filter(Boolean)], ['Spouse', n.spouses.map(npc).filter(Boolean)],
+        ['Siblings', siblingsOf(n.id)], ['Children', childrenOf(n.id)],
+      ].filter(([, p]) => p.length).map(([k, p]) => `<div><b>${k}:</b> ${p.map(x => esc(x.name)).join(', ')}</div>`).join('');
+      const bonds = n.bonds.filter(b => npc(b.id) && (withSecrets || !b.type.startsWith('Secretly') && !b.type.startsWith('Is secretly')))
+        .map(b => `<div><b>${esc(b.type)}:</b> ${esc(npc(b.id).name)}${b.note ? ' — ' + esc(b.note) : ''}</div>`).join('');
+      const facs = n.factions.filter(f => faction(f.id)).map(f => `${esc(faction(f.id).name)} (${esc(f.rank)})`).join(', ');
+      return `<div class="pcard">
+        <div class="pcard-head">${avatar(n, 72)}<div><h2>${esc(n.name)}</h2>
+          <div>${[n.race, n.gender, n.age && 'Age ' + n.age, n.occupation].filter(Boolean).map(esc).join(' · ')}</div>
+          ${withSecrets ? `<div>${esc(n.alignment)} · ${esc(n.status)}</div>` : ''}
+          ${l ? `<div>📍 ${esc(l.name)}</div>` : ''}</div></div>
+        ${n.description ? `<p class="prewrap">${esc(n.description)}</p>` : ''}
+        ${facs ? `<div><b>Factions:</b> ${facs}</div>` : ''}
+        ${fam}${bonds}
+        ${withSecrets && n.notes ? `<div class="psecret prewrap"><b>🤫 DM secrets:</b> ${esc(n.notes)}</div>` : ''}
+      </div>`;
+    }).join('');
+    document.body.classList.add('printing');
+    const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => { window.print(); setTimeout(done, 500); }, 50);
   }
 
   // ---------- routing (tabs) ----------
-  const ui = { npcId: null, editing: false, search: '', locFilter: '', treeId: null, editLocId: null };
+  const ui = { npcId: null, editing: false, search: '', locFilter: '', treeId: null, editLocId: null, editFacId: null, facId: null };
   function route() {
     const tab = (location.hash || '#npcs').slice(1).split('/')[0];
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab !== 'market') window.Market.stop();
     const app = $('#app');
-    ({ npcs: renderNpcs, locations: renderLocations, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings }[tab] || renderNpcs)(app);
+    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings }[tab] || renderNpcs)(app);
   }
+  // lets the market read your locations (for city prices)
+  window.World = { locations: () => state.locations, esc };
   window.addEventListener('hashchange', route);
   function go(tab) { if (location.hash === '#' + tab) route(); else location.hash = tab; }
 
@@ -155,10 +266,10 @@
       (!ui.locFilter || (ui.locFilter === '__none' ? !loc(n.locationId) : n.locationId === ui.locFilter))
     ).sort(byName);
     $('#npcList').innerHTML = list.length ? list.map(n => `
-      <li data-id="${n.id}" class="${n.id === ui.npcId ? 'sel' : ''}">
+      <li data-id="${n.id}" class="li-flex ${n.id === ui.npcId ? 'sel' : ''}">${avatar(n)}<div>
         <div>${esc(n.name)} ${n.status !== 'Alive' ? `<span class="badge ${n.status === 'Dead' ? 'dead' : 'missing'}">${esc(n.status)}</span>` : ''}</div>
         <div class="sub">${esc([n.race, n.occupation].filter(Boolean).join(' · '))} ${loc(n.locationId) ? '· 📍 ' + esc(loc(n.locationId).name) : ''}</div>
-      </li>`).join('') : '<li class="muted" style="cursor:default">No NPCs found.</li>';
+      </div></li>`).join('') : '<li class="muted" style="cursor:default">No NPCs found.</li>';
     document.querySelectorAll('#npcList li[data-id]').forEach(li => li.onclick = () => {
       ui.npcId = li.dataset.id; ui.editing = false; renderNpcList(); renderNpcDetail();
       if (window.innerWidth < 800) $('#npcDetail').scrollIntoView({ behavior: 'smooth' });
@@ -181,9 +292,23 @@
       <span class="chip"><a href="#" data-goto="${p.id}">${esc(p.name)}</a>
       <button class="btn-x" title="Remove link" data-unlink="${type}" data-other="${p.id}">×</button></span>`).join('') : '<span class="muted small">none yet</span>';
     const others = state.npcs.filter(o => o.id !== n.id).sort(byName);
+    const bondChips = n.bonds.filter(b => npc(b.id)).map(b => `
+      <span class="chip ${BAD_BONDS.includes(b.type) ? 'bad' : ''}"><span class="muted small">${esc(b.type)}:</span>&nbsp;<a href="#" data-goto="${b.id}">${esc(npc(b.id).name)}</a>
+      ${b.note ? `<span class="muted small">&nbsp;— ${esc(b.note)}</span>` : ''}
+      <button class="btn-x" title="Remove" data-unbond="${esc(b.type)}" data-other="${b.id}">×</button></span>`).join('') || '<span class="muted small">none yet</span>';
+    const facChips = n.factions.filter(f => faction(f.id)).map(f => {
+      const F = faction(f.id);
+      return `<span class="chip" style="border-color:${F.color}"><span class="dot" style="background:${F.color}"></span>
+        <a href="#factions" data-fac="${F.id}">${esc(F.name)}</a>&nbsp;<span class="muted small">${esc(f.rank)}</span>
+        <button class="btn-x" title="Leave faction" data-leave="${F.id}">×</button></span>`;
+    }).join('') || '<span class="muted small">not in any faction</span>';
     box.innerHTML = `
-      <div class="row" style="justify-content:space-between">
-        <div style="flex:1 1 300px">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <label class="portrait" title="Click to upload a picture">
+          ${n.portrait ? `<img src="${esc(n.portrait)}" alt="Portrait of ${esc(n.name)}">` : '<span>📷<br>Add<br>picture</span>'}
+          <input type="file" id="portraitFile" accept="image/*" hidden>
+        </label>
+        <div style="flex:1 1 240px">
           <h2 style="margin-bottom:4px">${esc(n.name)}</h2>
           <div>${[n.race, n.gender, n.age && `Age ${n.age}`, n.occupation, n.alignment].filter(Boolean).map(v => `<span class="badge">${esc(v)}</span>`).join('')}
           <span class="badge ${n.status === 'Dead' ? 'dead' : n.status !== 'Alive' ? 'missing' : ''}">${esc(n.status)}</span></div>
@@ -193,6 +318,11 @@
           <button class="btn" id="treeNpc">🌳 Family tree</button>
           <button class="btn danger" id="delNpc">🗑 Delete</button>
         </div>
+      </div>
+      <div class="row" style="margin-top:8px;justify-content:flex-start">
+        <button class="btn small" id="printPlayer" style="flex:0">🖨 Player card</button>
+        <button class="btn small" id="printDm" style="flex:0">🖨 DM card (with secrets)</button>
+        ${n.portrait ? '<button class="btn small danger" id="rmPortrait" style="flex:0">Remove picture</button>' : ''}
       </div>
       <div class="stack" style="margin-top:14px">
         <div class="field-view"><div class="k">📍 Location</div>${l ? `<a href="#" id="gotoLoc">${esc(l.name)}</a> <span class="muted small">${esc(l.type || '')}${l.region ? ' · ' + esc(l.region) : ''}</span>` : '<span class="muted">Unknown / wandering</span>'}</div>
@@ -214,7 +344,51 @@
             <button class="btn primary" id="addRel" style="flex:0">+ Link</button>
           </div>` : '<p class="muted small">Add more NPCs to build a family.</p>'}
         </div>
+        <div>
+          <h3>🤝 Relationships</h3>
+          <div class="rel-group">${bondChips}</div>
+          ${others.length ? `
+          <div class="row">
+            <select id="bondOther" style="flex:2 1 160px"><option value="">Choose an NPC…</option>${others.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}</select>
+            <span class="muted" style="flex:0">is ${esc(n.name.split(' ')[0])}'s</span>
+            <select id="bondType" style="flex:1 1 140px">${Object.keys(BONDS).map(t => `<option>${esc(t)}</option>`).join('')}</select>
+            <input id="bondNote" maxlength="120" placeholder="note (optional) e.g. owes 50 gp" style="flex:2 1 180px">
+            <button class="btn primary" id="addBond" style="flex:0">+ Add</button>
+          </div>` : ''}
+        </div>
+        <div>
+          <h3>⚜️ Factions</h3>
+          <div class="rel-group">${facChips}</div>
+          ${state.factions.length ? `
+          <div class="row">
+            <select id="facSel" style="flex:2 1 160px"><option value="">Choose a faction…</option>${[...state.factions].sort(byName).map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('')}</select>
+            <input id="facRank" maxlength="40" placeholder="rank, e.g. Member" style="flex:1 1 120px">
+            <button class="btn primary" id="joinFac" style="flex:0">+ Join</button>
+          </div>` : '<p class="muted small">Make factions in the ⚜️ Factions tab.</p>'}
+        </div>
       </div>`;
+    $('#printPlayer').onclick = () => printNpcs([n], false);
+    $('#printDm').onclick = () => printNpcs([n], true);
+    $('#portraitFile').onchange = async e => {
+      try { n.portrait = await readPortrait(e.target.files[0]); save(); toast('📷 Picture added!'); renderNpcList(); renderNpcDetail(); }
+      catch (err) { toast("⚠️ That file isn't a picture I can read."); }
+    };
+    const rp = $('#rmPortrait'); if (rp) rp.onclick = () => { n.portrait = ''; save(); renderNpcList(); renderNpcDetail(); };
+    box.querySelectorAll('[data-unbond]').forEach(b => b.onclick = () => { removeBond(n.id, b.dataset.unbond, b.dataset.other); renderNpcDetail(); });
+    box.querySelectorAll('[data-leave]').forEach(b => b.onclick = () => { leaveFaction(n.id, b.dataset.leave); renderNpcDetail(); });
+    box.querySelectorAll('[data-fac]').forEach(a => a.onclick = e => { e.preventDefault(); ui.facId = a.dataset.fac; go('factions'); });
+    const ab = $('#addBond');
+    if (ab) ab.onclick = () => {
+      const err = addBond(n.id, $('#bondType').value, $('#bondOther').value, $('#bondNote').value.trim());
+      if (err) return toast(err);
+      toast('Relationship added!'); renderNpcDetail();
+    };
+    const jf = $('#joinFac');
+    if (jf) jf.onclick = () => {
+      const err = joinFaction(n.id, $('#facSel').value, $('#facRank').value.trim());
+      if (err) return toast(err);
+      toast('Joined the faction!'); renderNpcDetail();
+    };
     $('#editNpc').onclick = () => { ui.editing = true; renderNpcDetail(); };
     $('#treeNpc').onclick = () => { ui.treeId = n.id; go('tree'); };
     $('#delNpc').onclick = () => {
@@ -268,7 +442,7 @@
       if (!f.name) return toast('Your NPC needs a name!');
       f.locationId = f.locationId || null;
       if (isNew) {
-        const created = { id: uid(), parents: [], spouses: [], siblings: [], ...f };
+        const created = { id: uid(), parents: [], spouses: [], siblings: [], bonds: [], factions: [], portrait: '', ...f };
         state.npcs.push(created); ui.npcId = created.id;
         toast(`✨ ${f.name} joins your world!`);
       } else {
@@ -282,7 +456,7 @@
   // ================= LOCATIONS =================
   function renderLocations(app) {
     const editing = ui.editLocId ? loc(ui.editLocId) : null;
-    const l = editing || { name: '', type: 'Village', region: '', notes: '' };
+    const l = editing || { name: '', type: 'Village', region: '', notes: '', priceMod: 1, warExposure: 1 };
     const unplaced = state.npcs.filter(n => !loc(n.locationId));
     app.innerHTML = `
       <div class="panel">
@@ -292,6 +466,8 @@
             <div><label>Name *</label><input name="name" required maxlength="80" value="${esc(l.name)}" placeholder="e.g. Waterdeep"></div>
             <div><label>Type</label><select name="type">${opts(LOC_TYPES, l.type)}</select></div>
             <div><label>Region / inside of</label><input name="region" maxlength="80" value="${esc(l.region)}" placeholder="e.g. Sword Coast"></div>
+            <div><label>💰 Price level here</label><select name="priceMod">${numOpts(PRICE_LEVELS, l.priceMod)}</select></div>
+            <div><label>⚔️ How close is the war?</label><select name="warExposure">${numOpts(EXPOSURE, l.warExposure)}</select></div>
           </div>
           <div><label>Notes</label><textarea name="notes" maxlength="4000" style="min-height:60px">${esc(l.notes)}</textarea></div>
           <div class="row" style="justify-content:flex-end">
@@ -309,7 +485,12 @@
             ${L.notes ? `<p class="small prewrap">${esc(L.notes)}</p>` : ''}
             <div class="small" style="margin-top:6px"><b>${people.length}</b> NPC${people.length === 1 ? '' : 's'} here:</div>
             <ul>${people.map(p => `<li><a href="#" data-goto="${p.id}">${esc(p.name)}</a> <span class="muted small">${esc(p.occupation || '')}</span></li>`).join('') || '<li class="muted small">nobody yet</li>'}</ul>
-            <div class="row"><button class="btn small" data-edit="${L.id}">✏️ Edit</button><button class="btn small danger" data-del="${L.id}">🗑 Delete</button></div>
+            <div class="small muted">💰 ${esc(labelOf(PRICE_LEVELS, L.priceMod))} prices · ⚔️ ${esc(labelOf(EXPOSURE, L.warExposure))}</div>
+            <div class="row" style="margin-top:8px">
+              <button class="btn small" data-prices="${L.id}">💰 Prices here</button>
+              <button class="btn small" data-print="${L.id}" ${people.length ? '' : 'disabled'}>🖨 Print NPCs</button>
+            </div>
+            <div class="row" style="margin-top:6px"><button class="btn small" data-edit="${L.id}">✏️ Edit</button><button class="btn small danger" data-del="${L.id}">🗑 Delete</button></div>
           </div>`;
         }).join('')}
         ${unplaced.length ? `<div class="panel loc-card"><h3>❔ Unknown / wandering</h3>
@@ -321,6 +502,7 @@
       const f = Object.fromEntries(new FormData(e.target).entries());
       Object.keys(f).forEach(k => f[k] = String(f[k]).trim());
       if (!f.name) return toast('The location needs a name!');
+      f.priceMod = Number(f.priceMod) || 1; f.warExposure = Number(f.warExposure) || 1;
       if (editing) { Object.assign(editing, f); toast('Saved!'); }
       else { state.locations.push({ id: uid(), ...f }); toast(`🏰 ${f.name} added to the map!`); }
       ui.editLocId = null; save(); renderLocations(app);
@@ -336,6 +518,97 @@
       save(); toast(`${L.name} was removed.`); renderLocations(app);
     });
     app.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
+    app.querySelectorAll('[data-prices]').forEach(b => b.onclick = () => { window.Market.setCity(b.dataset.prices); go('market'); });
+    app.querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
+      const people = state.npcs.filter(n => n.locationId === b.dataset.print).sort(byName);
+      printNpcs(people, confirm('Include secret DM notes?\n\nOK = DM copy (with secrets)\nCancel = player copy'));
+    });
+  }
+
+  // ================= FACTIONS =================
+  function renderFactions(app) {
+    const editing = ui.editFacId ? faction(ui.editFacId) : null;
+    const f = editing || { name: '', type: 'Guild', color: '#c98a3d', hqId: '', goals: '', notes: '' };
+    app.innerHTML = `
+      <div class="panel">
+        <h2>${editing ? '✏️ Edit ' + esc(editing.name) : '⚜️ Add a faction'}</h2>
+        <p class="small muted" style="margin-top:-6px">Guilds, noble houses, cults, armies, thieves' guilds… any group of NPCs.</p>
+        <form id="facForm" class="stack" autocomplete="off">
+          <div class="grid2">
+            <div><label>Name *</label><input name="name" required maxlength="80" value="${esc(f.name)}" placeholder="e.g. The Zhentarim"></div>
+            <div><label>Type</label><select name="type">${opts(FACTION_TYPES, f.type)}</select></div>
+            <div><label>Headquarters</label><select name="hqId"><option value="">Unknown / none</option>
+              ${[...state.locations].sort(byName).map(l => `<option value="${l.id}" ${l.id === f.hqId ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>
+            <div><label>Banner color</label><input type="color" name="color" value="${esc(f.color)}" style="height:40px;padding:3px"></div>
+          </div>
+          <div class="grid2">
+            <div><label>Goals (what do they want?)</label><textarea name="goals" maxlength="2000" style="min-height:60px">${esc(f.goals)}</textarea></div>
+            <div><label>🤫 Secret DM notes</label><textarea name="notes" maxlength="2000" style="min-height:60px">${esc(f.notes)}</textarea></div>
+          </div>
+          <div class="row" style="justify-content:flex-end">
+            ${editing ? '<button type="button" class="btn" id="cancelFac" style="flex:0">Cancel</button>' : ''}
+            <button class="btn primary" type="submit" style="flex:0">${editing ? '💾 Save' : '+ Add faction'}</button>
+          </div>
+        </form>
+      </div>
+      <div class="loc-grid">
+        ${[...state.factions].sort(byName).map(F => {
+          const members = membersOf(F.id).sort(byName), hq = loc(F.hqId);
+          const nonMembers = state.npcs.filter(n => !members.includes(n)).sort(byName);
+          return `<div class="panel loc-card fac-card ${ui.facId === F.id ? 'sel' : ''}" id="fac-${F.id}" style="border-top:4px solid ${F.color}">
+            <h3>${esc(F.name)}</h3>
+            <div class="small muted">${esc(F.type)}${hq ? ' · 🏠 ' + esc(hq.name) : ''}</div>
+            ${F.goals ? `<p class="small prewrap"><b>Goals:</b> ${esc(F.goals)}</p>` : ''}
+            ${F.notes ? `<p class="small prewrap field-view secret">🤫 ${esc(F.notes)}</p>` : ''}
+            <div class="small" style="margin-top:6px"><b>${members.length}</b> member${members.length === 1 ? '' : 's'}:</div>
+            <ul class="members">${members.map(p => `<li>${avatar(p, 24)} <a href="#" data-goto="${p.id}">${esc(p.name)}</a>
+              <span class="muted small">${esc(rankIn(p, F.id))}</span>
+              <button class="btn-x" title="Remove from faction" data-kick="${p.id}" data-f="${F.id}">×</button></li>`).join('') || '<li class="muted small">no members yet</li>'}</ul>
+            ${nonMembers.length ? `<div class="row">
+              <select data-addsel="${F.id}" style="flex:2 1 120px"><option value="">Add member…</option>${nonMembers.map(n => `<option value="${n.id}">${esc(n.name)}</option>`).join('')}</select>
+              <input data-addrank="${F.id}" maxlength="40" placeholder="rank" style="flex:1 1 70px">
+              <button class="btn small primary" data-add="${F.id}" style="flex:0">+</button></div>` : ''}
+            <div class="row" style="margin-top:8px">
+              <button class="btn small" data-print="${F.id}" ${members.length ? '' : 'disabled'}>🖨 Print</button>
+              <button class="btn small" data-edit="${F.id}">✏️ Edit</button>
+              <button class="btn small danger" data-del="${F.id}">🗑 Delete</button></div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${state.factions.length ? '' : '<div class="empty">No factions yet — add your first one above!</div>'}`;
+    $('#facForm').onsubmit = e => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(e.target).entries());
+      Object.keys(d).forEach(k => d[k] = String(d[k]).trim());
+      if (!d.name) return toast('The faction needs a name!');
+      if (!/^#[0-9a-fA-F]{6}$/.test(d.color)) d.color = '#c98a3d';
+      d.hqId = d.hqId || null;
+      if (editing) { Object.assign(editing, d); toast('Saved!'); }
+      else { state.factions.push({ id: uid(), ...d }); toast(`⚜️ ${d.name} has been founded!`); }
+      ui.editFacId = null; save(); renderFactions(app);
+    };
+    const c = $('#cancelFac'); if (c) c.onclick = () => { ui.editFacId = null; renderFactions(app); };
+    app.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { ui.editFacId = b.dataset.edit; renderFactions(app); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      const F = faction(b.dataset.del);
+      if (!confirm(`Delete ${F.name}? Members stay in your world, they just leave the faction.`)) return;
+      state.factions = state.factions.filter(x => x.id !== F.id);
+      state.npcs.forEach(n => { n.factions = n.factions.filter(x => x.id !== F.id); });
+      if (ui.editFacId === F.id) ui.editFacId = null;
+      save(); toast(`${F.name} has been disbanded.`); renderFactions(app);
+    });
+    app.querySelectorAll('[data-add]').forEach(b => b.onclick = () => {
+      const fid = b.dataset.add;
+      const err = joinFaction(app.querySelector(`[data-addsel="${fid}"]`).value, fid, app.querySelector(`[data-addrank="${fid}"]`).value.trim());
+      if (err) return toast('Pick an NPC first.');
+      ui.facId = fid; renderFactions(app);
+    });
+    app.querySelectorAll('[data-kick]').forEach(b => b.onclick = () => { leaveFaction(b.dataset.kick, b.dataset.f); renderFactions(app); });
+    app.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
+    app.querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
+      printNpcs(membersOf(b.dataset.print).sort(byName), confirm('Include secret DM notes?\n\nOK = DM copy (with secrets)\nCancel = player copy'));
+    });
+    if (ui.facId) { const el = document.getElementById('fac-' + ui.facId); if (el) el.scrollIntoView({ block: 'center' }); }
   }
 
   // ================= FAMILY TREE =================
@@ -420,12 +693,22 @@
       const n = npc(id), isFocus = id === focus.id, dead = n.status === 'Dead';
       const g = mk('g', { class: 'tree-node', transform: `translate(${p.x},${p.y})` });
       mk('rect', { width: W, height: H, rx: 10, fill: isFocus ? '#3d3220' : '#26201a', stroke: isFocus ? '#e0b354' : dead ? '#e2735f' : '#4a3f31', 'stroke-width': isFocus ? 2.5 : 1.5 }, g);
-      const name = mk('text', { x: W / 2, y: 24, 'text-anchor': 'middle', fill: dead ? '#b3a58c' : '#efe6d4', 'font-size': 13, 'font-weight': 600, 'font-family': 'system-ui, sans-serif' }, g);
+      let tx = W / 2;
+      if (n.portrait) {
+        const cid = 'clip-' + id;
+        const cp = mk('clipPath', { id: cid }, g); mk('circle', { cx: 29, cy: H / 2, r: 21 }, cp);
+        const im = mk('image', { x: 8, y: H / 2 - 21, width: 42, height: 42, 'clip-path': `url(#${cid})`, preserveAspectRatio: 'xMidYMid slice' }, g);
+        im.setAttribute('href', n.portrait);
+        tx = 56 + (W - 56) / 2;
+      }
+      const name = mk('text', { x: tx, y: 24, 'text-anchor': 'middle', fill: dead ? '#b3a58c' : '#efe6d4', 'font-size': 13, 'font-weight': 600, 'font-family': 'system-ui, sans-serif' }, g);
       const nm = (dead ? '✝ ' : '') + n.name;
-      name.textContent = nm.length > 21 ? nm.slice(0, 20) + '…' : nm; // textContent = safe, no HTML
-      const sub = mk('text', { x: W / 2, y: 43, 'text-anchor': 'middle', fill: '#b3a58c', 'font-size': 11, 'font-family': 'system-ui, sans-serif' }, g);
+      const nmax = n.portrait ? 14 : 21;
+      name.textContent = nm.length > nmax ? nm.slice(0, nmax - 1) + '…' : nm; // textContent = safe, no HTML
+      const sub = mk('text', { x: tx, y: 43, 'text-anchor': 'middle', fill: '#b3a58c', 'font-size': 11, 'font-family': 'system-ui, sans-serif' }, g);
       const st = [n.race, n.occupation].filter(Boolean).join(' · ');
-      sub.textContent = st.length > 26 ? st.slice(0, 25) + '…' : st;
+      const smax = n.portrait ? 17 : 26;
+      sub.textContent = st.length > smax ? st.slice(0, smax - 1) + '…' : st;
       const title = mk('title', {}, g); title.textContent = `${n.name}${loc(n.locationId) ? ' — ' + loc(n.locationId).name : ''}`;
       g.addEventListener('click', () => { ui.treeId = id; renderTree($('#app')); });
     });
@@ -455,7 +738,7 @@
           <button class="btn danger" id="clearBtn" style="flex:0">Start with an empty world</button>
           <button class="btn danger" id="marketReset" style="flex:0">Reset market (war = 14 days ago)</button>
         </div>
-        <p class="small muted">World: ${state.npcs.length} NPCs, ${state.locations.length} locations.</p>
+        <p class="small muted">World: ${state.npcs.length} NPCs, ${state.locations.length} locations, ${state.factions.length} factions.</p>
       </div>`;
     $('#exportBtn').onclick = () => {
       const data = { ...state, market: window.Market._state(), exportedAt: new Date().toISOString() };
@@ -476,7 +759,7 @@
       } catch (err) { toast("⚠️ That file doesn't look like a World Keeper backup."); }
     };
     $('#sampleBtn').onclick = () => { if (confirm('Replace everything with the example world?')) { state = sampleWorld(); save(); ui.npcId = ui.treeId = null; toast('Example world loaded.'); renderSettings(app); } };
-    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 1, npcs: [], locations: [] }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
+    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 2, npcs: [], locations: [], factions: [] }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
     $('#marketReset').onclick = () => { if (confirm('Reset the market back to "war started 14 days ago"?')) { window.Market.reset(); toast('Market reset.'); } };
   }
 

@@ -6,6 +6,10 @@ A web app for Dungeon Masters:
 - 🌳 **Family trees**: link NPCs as parents, children, spouses and siblings, then see the tree
 - 💰 **Living market**: about 30 items (beer, bread, healing potions, weapons, inn stays by comfort level…)
   with 2 years of price history and live-ticking prices. A war started 14 days ago and is still affecting prices.
+- ⚜️ **Factions**: guilds, noble houses and cults, with ranks
+- 🤝 **Relationships**: friends, rivals, enemies, employers, debts, secret hatreds
+- 📷 **Portraits** and 🖨 **printable NPC cards** (player or DM version)
+- 📍 **City prices**: every location has its own prices, and the war hits front-line towns hardest. ✨ You can add your own market items too
 - ⚙️ **Backup**: download and load your world as a file
 
 ## How to open it
