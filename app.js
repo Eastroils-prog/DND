@@ -42,10 +42,11 @@
   // ---------- data ----------
   // ---------- your world: Frindeval (data lives in world-data.js) ----------
   function buildFrindeval() {
-    if (!window.FRINDEVAL) return { version: 3, frindeval: WORLD_VERSION, locations: [], factions: [], npcs: [], maps: [], roads: [], sim: { day: 0, log: [] } };
+    if (!window.FRINDEVAL) return { version: 3, frindeval: WORLD_VERSION, locations: [], factions: [], npcs: [], maps: [], roads: [], monsters: [], sim: { day: 0, log: [] } };
     const W = JSON.parse(JSON.stringify(window.FRINDEVAL)); // copy, so the original data stays untouched
     if (window.FRINDEVAL_GENERATE) window.FRINDEVAL_GENERATE(W, 10); // fill every place up to 10 people
-    const world = { version: 3, frindeval: WORLD_VERSION, locations: [], factions: [], npcs: [], maps: [], roads: [], sim: { day: 0, log: [] } };
+    if (window.FRINDEVAL_ANCESTORS) window.FRINDEVAL_ANCESTORS(W);   // parents & grandparents for all, 5 generations for nobles
+    const world = { version: 3, frindeval: WORLD_VERSION, locations: [], factions: [], npcs: [], maps: [], roads: [], monsters: [], sim: { day: 0, log: [] } };
     const id = {};
     world.maps = W.maps.map(m => ({ id: m.id, name: m.name, src: m.src, hidden: !!m.hidden, pins: {} }));
     world.locations = W.locations.map(l => {
@@ -63,7 +64,7 @@
       locationId: id['L:' + n.loc] || null, known: !!n.known, portrait: '',
       parents: (n.parents || []).map(k => id['N:' + k]).filter(Boolean), spouses: [], siblings: [], bonds: [],
       factions: (n.factions || []).map(([k, rank]) => ({ id: id['F:' + k], rank })).filter(f => f.id),
-      ...(n.generated ? { generated: true } : {}),
+      ...(n.generated ? { generated: true } : {}), ...(n.ancestor ? { ancestor: true } : {}),
     }));
     world.roads = (W.roads || []).map(([a, b, d]) => [id['L:' + a], id['L:' + b], d]).filter(r => r[0] && r[1]);
     // travellers: some start at home, some already on the road
@@ -102,7 +103,7 @@
     npcs: ['Old Durgan Ironfoot', 'Brom Ironfoot', 'Hilda Ironfoot', 'Torin Ironfoot', 'Mara Ironfoot', 'Elsa Brightwater', 'Lord Aldric Vex'],
     factions: ['The Iron Brotherhood', "The Queen's Eyes", 'Saltmere Trading Company'],
   };
-  const WORLD_VERSION = 2;
+  const WORLD_VERSION = 3;
   let migratedToFrindeval = false;
   function removeOldExample(s) {
     const oldL = new Set(s.locations.filter(l => OLD_EXAMPLE.locations.includes(l.name)).map(l => l.id));
@@ -135,13 +136,15 @@
     });
     const remapTravel = t => t && ({ ...t, route: t.route.map(id => lmap[id]).filter(Boolean),
       road: t.road ? { ...t.road, from: lmap[t.road.from], to: lmap[t.road.to] } : null });
-    const added = [];
+    const added = [], matched = [];
     F.npcs.forEach(n => {
       const mine = s.npcs.find(x => same(x.name, n.name));
-      if (mine) { nmap[n.id] = mine.id; if (!mine.travel && n.travel) { mine.travel = remapTravel(n.travel); if (mine.travel.road) mine.travel.road = null; } return; }
+      if (mine) { nmap[n.id] = mine.id; matched.push([mine, n]); if (!mine.travel && n.travel) { mine.travel = remapTravel(n.travel); if (mine.travel.road) mine.travel.road = null; } return; }
       nmap[n.id] = n.id; added.push(n);
     });
     const addedIds = new Set(added.map(n => n.id));
+    // people you already had get their new ancestors (only if they had no parents yet)
+    matched.forEach(([mine, n]) => { if (!mine.parents.length && n.parents.length) mine.parents = n.parents.map(x => nmap[x]).filter(Boolean); });
     added.forEach(n => {
       n.locationId = lmap[n.locationId] || null;
       ['parents', 'spouses', 'siblings'].forEach(k => { n[k] = n[k].map(x => nmap[x]).filter(Boolean); });
@@ -195,6 +198,7 @@
       }
       return { id: String(m.id), name: String(m.name || 'Map'), src: safeMapSrc(m.src), hidden: m.hidden === true, pins };
     });
+    s.monsters = (Array.isArray(s.monsters) ? s.monsters : []).filter(m => m && m.id && m.name).map(m => ({ ...m, custom: true }));
     s.roads = (Array.isArray(s.roads) ? s.roads : []).filter(r => Array.isArray(r) && r.length === 3 && r[2] > 0);
     s.sim = s.sim && typeof s.sim === 'object' ? { day: Number(s.sim.day) || 0, log: Array.isArray(s.sim.log) ? s.sim.log.slice(0, 150) : [] } : { day: 0, log: [] };
     s.npcs.forEach(n => {
@@ -355,7 +359,7 @@
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab !== 'market') window.Market.stop();
     const app = $('#app');
-    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, maps: renderMaps, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings, cloud: renderSettings }[tab] || renderNpcs)(app);
+    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, maps: renderMaps, bestiary: renderBestiary, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings, cloud: renderSettings }[tab] || renderNpcs)(app);
   }
   // lets the market read your locations (for city prices)
   window.World = { locations: () => state.locations, esc };
@@ -376,7 +380,7 @@
           </div>
           <div class="stack" style="margin-top:12px">
             <input id="npcSearch" placeholder="🔍 Search name, job, race…" value="${esc(ui.search)}">
-            <select id="npcWho">${[['', '👥 Everyone'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now']]
+            <select id="npcWho">${[['', '👥 Everyone (living world)'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now'], ['ancestors', '📜 Ancestors (family trees)'], ['all', '🗂 Absolutely everyone']]
               .map(([v, l]) => `<option value="${v}" ${ui.who === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
             <select id="npcLoc"><option value="">📍 All locations</option><option value="__none" ${ui.locFilter === '__none' ? 'selected' : ''}>Unknown / wandering</option>
               ${[...state.locations].sort(byName).map(l => `<option value="${l.id}" ${ui.locFilter === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select>
@@ -399,7 +403,7 @@
     const list = state.npcs.filter(n =>
       (!q || [n.name, n.occupation, n.race].some(v => (v || '').toLowerCase().includes(q))) &&
       (!ui.locFilter || (ui.locFilter === '__none' ? !loc(n.locationId) : n.locationId === ui.locFilter)) &&
-      (!ui.who || (ui.who === 'main' ? !n.generated : ui.who === 'villagers' ? n.generated : ui.who === 'travel' ? !!n.travel : !!(n.travel && n.travel.road)))
+      (ui.who === 'all' || (ui.who === 'ancestors' ? n.ancestor : !n.ancestor && (!ui.who || (ui.who === 'main' ? !n.generated : ui.who === 'villagers' ? n.generated : ui.who === 'travel' ? !!n.travel : !!(n.travel && n.travel.road)))))
     ).sort(byName);
     $('#npcList').innerHTML = list.length ? list.map(n => `
       <li data-id="${n.id}" class="li-flex ${n.id === ui.npcId ? 'sel' : ''}">${avatar(n)}<div>
@@ -612,7 +616,7 @@
   function renderLocations(app) {
     const editing = ui.editLocId ? loc(ui.editLocId) : null;
     const l = editing || { name: '', type: 'Village', region: '', notes: '', priceMod: 1, warExposure: 1 };
-    const unplaced = state.npcs.filter(n => !loc(n.locationId));
+    const unplaced = state.npcs.filter(n => !loc(n.locationId) && !n.ancestor && n.status !== 'Dead' && !(n.travel && n.travel.road));
     app.innerHTML = `
       <div class="panel">
         <h2>${editing ? '✏️ Edit ' + esc(editing.name) : '🏰 Add a location'}</h2>
@@ -645,6 +649,9 @@
             ${(() => { const coming = state.npcs.filter(p => p.travel && p.travel.road && p.travel.road.to === L.id);
               return coming.length ? `<div class="small muted">🐎 On the way here: ${coming.map(p => `${esc(p.name)} (${p.travel.road.left} d)`).join(', ')}</div>` : ''; })()}
             ${L.hidden ? '<span class="badge missing">🙈 secret place</span>' : ''}
+            <details class="small enemies-box"><summary>⚔️ Possible enemies (${enemiesAt(L).length})</summary>
+              <div style="margin:6px 0">${enemyChips(L)}</div>
+              <button class="btn small" data-encounter="${L.id}">🎲 Roll encounter</button> <span data-encout="${L.id}"></span></details>
             <div class="small muted">💰 ${esc(labelOf(PRICE_LEVELS, L.priceMod))} prices · ⚔️ ${esc(labelOf(EXPOSURE, L.warExposure))}</div>
             <div class="row" style="margin-top:8px">
               <button class="btn small" data-prices="${L.id}">💰 Prices here</button>
@@ -683,6 +690,7 @@
     app.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
     app.querySelectorAll('[data-prices]').forEach(b => b.onclick = () => { window.Market.setCity(b.dataset.prices); go('market'); });
     app.querySelectorAll('[data-showmap]').forEach(b => b.onclick = () => showOnMap(b.dataset.showmap));
+    wireEnemyChips(app);
     app.querySelectorAll('[data-allat]').forEach(a => a.onclick = e => { e.preventDefault(); ui.locFilter = a.dataset.allat; ui.who = ''; ui.search = ''; ui.npcId = null; go('npcs'); });
     app.querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
       const people = state.npcs.filter(n => n.locationId === b.dataset.print).sort(byName);
@@ -776,6 +784,248 @@
       printNpcs(membersOf(b.dataset.print).sort(byName), confirm('Include secret DM notes?\n\nOK = DM copy (with secrets)\nCancel = player copy'));
     });
     if (ui.facId) { const el = document.getElementById('fac-' + ui.facId); if (el) el.scrollIntoView({ block: 'center' }); }
+  }
+
+  // ================= BESTIARY =================
+  const CR_XP = { '0': 10, '1/8': 25, '1/4': 50, '1/2': 100, 1: 200, 2: 450, 3: 700, 4: 1100, 5: 1800, 6: 2300, 7: 2900, 8: 3900, 9: 5000, 10: 5900,
+    11: 7200, 12: 8400, 13: 10000, 14: 11500, 15: 13000, 16: 15000, 17: 18000, 18: 20000, 19: 22000, 20: 25000, 21: 33000, 22: 41000, 23: 50000, 24: 62000, 25: 75000, 26: 90000, 27: 105000, 28: 120000, 29: 135000, 30: 155000 };
+  const CRS = Object.keys(CR_XP).sort((a, b) => crNum(a) - crNum(b));
+  function crNum(cr) { cr = String(cr); return cr.includes('/') ? 1 / Number(cr.split('/')[1]) : Number(cr) || 0; }
+  const pbOf = cr => Math.max(2, Math.ceil(crNum(cr) / 4) + 1);
+  const ABIL = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
+  const SKILL_ABIL = { Acrobatics: 'DEX', 'Animal Handling': 'WIS', Arcana: 'INT', Athletics: 'STR', Deception: 'CHA', History: 'INT', Insight: 'WIS', Intimidation: 'CHA',
+    Investigation: 'INT', Medicine: 'WIS', Nature: 'INT', Perception: 'WIS', Performance: 'CHA', Persuasion: 'CHA', Religion: 'INT', 'Sleight of Hand': 'DEX', Stealth: 'DEX', Survival: 'WIS' };
+  const modOf = s => Math.floor((Number(s) - 10) / 2);
+  const sgn = n => (n >= 0 ? '+' : '−') + Math.abs(n);
+  const allMonsters = () => (window.BESTIARY || []).concat(state.monsters || []);
+  const monster = id => allMonsters().find(m => m.id === id);
+  const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  const enemiesAt = L => allMonsters().filter(m => (m.habitats || []).some(h => sameName(h, L.name) || sameName(h, L.region || '')))
+    .sort((a, b) => crNum(a.cr) - crNum(b.cr));
+  function monsterMath(m) {
+    const pb = pbOf(m.cr), mods = {};
+    ABIL.forEach((a, i) => { mods[a] = modOf((m.abil || [])[i] ?? 10); });
+    const [n, d] = m.hd || [1, 8];
+    const hp = Math.max(1, Math.floor(n * (d + 1) / 2) + n * mods.CON);
+    return { pb, mods, hp, hpDice: `${n}d${d}${n * mods.CON ? ` ${n * mods.CON > 0 ? '+' : '−'} ${Math.abs(n * mods.CON)}` : ''}` };
+  }
+  // turns {hit:STR}, {dc:CON}, [2d6+STR] into real numbers for this creature
+  function fillText(m, text) {
+    const { pb, mods } = monsterMath(m);
+    return esc(text)
+      .replace(/\{hit:(STR|DEX|CON|INT|WIS|CHA)\}/g, (_, a) => sgn(pb + mods[a]))
+      .replace(/\{dc:(STR|DEX|CON|INT|WIS|CHA)\}/g, (_, a) => `DC ${8 + pb + mods[a]}`)
+      .replace(/\[(\d+)d(\d+)(?:\s*\+\s*(STR|DEX|CON|INT|WIS|CHA|\d+))?\]/g, (_, x, y, b) => {
+        const bonus = b ? (/^\d+$/.test(b) ? Number(b) : mods[b]) : 0;
+        const avg = Math.max(1, Math.floor(x * (Number(y) + 1) / 2 + bonus));
+        return `${avg} (${x}d${y}${bonus ? ` ${bonus > 0 ? '+' : '−'} ${Math.abs(bonus)}` : ''})`;
+      })
+      .replace(/\n/g, '<br>');
+  }
+  function statBlockHtml(m) {
+    const { pb, mods, hp, hpDice } = monsterMath(m);
+    const skillList = (m.skills || []).map(([s, a, mult]) => `${s} ${sgn(mods[a || SKILL_ABIL[s] || 'WIS'] + pb * (mult || 1))}`);
+    const percSkill = (m.skills || []).find(([s]) => s === 'Perception');
+    const passive = 10 + mods.WIS + (percSkill ? pb * (percSkill[2] || 1) : 0);
+    const line = (k, v) => v ? `<div class="sb-line"><b>${k}</b> ${esc(v)}</div>` : '';
+    const block = (title, list) => list && list.length ? `${title ? `<h4 class="sb-sect">${title}</h4>` : ''}${list.map(([n, t]) => `<p class="sb-p"><b><i>${esc(n)}.</i></b> ${fillText(m, t)}</p>`).join('')}` : '';
+    return `<div class="statblock">
+      <div class="sb-name">${esc(m.name)}</div>
+      <div class="sb-meta">${esc(m.size || 'Medium')} ${esc(m.type || 'creature')}, ${esc(m.align || 'unaligned')}</div>
+      <div class="sb-rule"></div>
+      <div class="sb-line"><b>Armor Class</b> ${esc(m.ac)}${m.acNote ? ` (${esc(m.acNote)})` : ''}</div>
+      <div class="sb-line"><b>Hit Points</b> ${hp} (${hpDice})</div>
+      <div class="sb-line"><b>Speed</b> ${esc(m.speed || '30 ft.')}</div>
+      <div class="sb-rule"></div>
+      <div class="sb-abil">${ABIL.map((a, i) => `<div><b>${a}</b><br>${(m.abil || [])[i] ?? 10} (${sgn(mods[a])})</div>`).join('')}</div>
+      <div class="sb-rule"></div>
+      ${(m.saves || []).length ? `<div class="sb-line"><b>Saving Throws</b> ${m.saves.map(a => `${a[0]}${a.slice(1).toLowerCase()} ${sgn(mods[a] + pb)}`).join(', ')}</div>` : ''}
+      ${skillList.length ? `<div class="sb-line"><b>Skills</b> ${esc(skillList.join(', '))}</div>` : ''}
+      ${line('Damage Vulnerabilities', m.vuln)}${line('Damage Resistances', m.res)}${line('Damage Immunities', m.imm)}${line('Condition Immunities', m.cimm)}
+      <div class="sb-line"><b>Senses</b> ${m.senses ? esc(m.senses) + ', ' : ''}passive Perception ${passive}</div>
+      ${line('Languages', m.lang || '—')}
+      <div class="sb-line sb-cr"><span><b>Challenge</b> ${esc(m.cr)} (${(CR_XP[m.cr] || 0).toLocaleString()} XP)</span><span><b>Proficiency Bonus</b> ${sgn(pb)}</span></div>
+      <div class="sb-rule"></div>
+      ${block('', m.traits)}
+      ${block('Actions', m.actions)}
+      ${block('Bonus Actions', m.bonus)}
+      ${block('Reactions', m.reactions)}
+      ${m.legendary ? `<h4 class="sb-sect">Legendary Actions</h4><p class="sb-p">${fillText(m, m.legendary.intro || '')}</p>${(m.legendary.actions || []).map(([n, t]) => `<p class="sb-p sb-leg"><b>${esc(n)}.</b> ${fillText(m, t)}</p>`).join('')}` : ''}
+    </div>`;
+  }
+  function placesFor(m) { // locations where this creature can appear
+    return state.locations.filter(L => (m.habitats || []).some(h => sameName(h, L.name) || sameName(h, L.region || ''))).sort(byName);
+  }
+  function rollEncounter(L) {
+    const list = enemiesAt(L); if (!list.length) return null;
+    const m = list[Math.floor(Math.random() * list.length)], c = crNum(m.cr);
+    const d = s => 1 + Math.floor(Math.random() * s);
+    const count = m.boss ? 1 : c < 1 ? d(6) + 1 : c <= 2 ? d(4) : c <= 5 ? d(2) : 1;
+    return { m, count };
+  }
+  function enemyChips(L) {
+    const list = enemiesAt(L);
+    if (!list.length) return '<span class="muted small">none known</span>';
+    return list.map(m => `<a href="#" class="chip enemy ${m.boss ? 'boss' : ''}" data-monster="${esc(m.id)}">${m.boss ? '💀 ' : ''}${esc(m.name)} <span class="muted small">CR ${esc(m.cr)}</span></a>`).join('');
+  }
+  function wireEnemyChips(root) {
+    root.querySelectorAll('[data-monster]').forEach(a => a.onclick = e => { e.preventDefault(); ui.monsterId = a.dataset.monster; ui.monsterEdit = false; go('bestiary'); });
+    root.querySelectorAll('[data-encounter]').forEach(b => b.onclick = () => {
+      const L = loc(b.dataset.encounter), r = L && rollEncounter(L);
+      const out = root.querySelector(`[data-encout="${b.dataset.encounter}"]`);
+      if (out) out.innerHTML = r ? `🎲 <b>${r.count}× <a href="#" data-monster="${esc(r.m.id)}">${esc(r.m.name)}</a></b> (CR ${esc(r.m.cr)})` : 'No enemies known here.';
+      wireEnemyChips(out || root);
+    });
+  }
+
+  function renderBestiary(app) {
+    const mons = allMonsters();
+    if (!monster(ui.monsterId)) ui.monsterId = mons.length ? mons[0].id : null;
+    const q = (ui.mSearch || '').toLowerCase();
+    const types = [...new Set(mons.map(m => (m.type || '').split(' ')[0]))].sort();
+    const list = mons.filter(m => (!q || m.name.toLowerCase().includes(q) || (m.habitats || []).join(' ').toLowerCase().includes(q))
+      && (!ui.mType || (m.type || '').startsWith(ui.mType))
+      && (!ui.mGroup || (ui.mGroup === 'dungeon' ? !!m.dungeon : ui.mGroup === 'regional' ? !m.dungeon && !m.custom : !!m.custom)))
+      .sort((a, b) => crNum(a.cr) - crNum(b.cr) || a.name.localeCompare(b.name));
+    app.innerHTML = `
+      <div class="split">
+        <aside class="panel">
+          <div class="row"><h2 style="margin:0">🐉 Bestiary <span class="muted small">(${mons.length})</span></h2>
+            <button class="btn primary" id="newMonster" style="flex:0">+ New</button></div>
+          <div class="stack" style="margin-top:12px">
+            <input id="mSearch" placeholder="🔍 Search name or place…" value="${esc(ui.mSearch || '')}">
+            <div class="row">
+              <select id="mGroup">${[['', 'All creatures'], ['regional', '🗺 Regional enemies'], ['dungeon', '⚱️ Vestige dungeons'], ['custom', '✏️ Your creatures']].map(([v, l]) => `<option value="${v}" ${ui.mGroup === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+              <select id="mType"><option value="">All types</option>${types.map(t => `<option ${ui.mType === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+            </div>
+          </div>
+          <ul class="item-list" id="mList">${list.map(m => `<li data-mid="${esc(m.id)}" class="${m.id === ui.monsterId ? 'sel' : ''}">
+            <div>${m.boss ? '💀 ' : ''}${esc(m.name)} <span class="badge">CR ${esc(m.cr)}</span></div>
+            <div class="sub">${esc(m.size || '')} ${esc(m.type || '')}${m.dungeon ? ' · ⚱️ ' + esc(m.dungeon) : ''}${m.custom ? ' · ✏️ yours' : ''}</div></li>`).join('') || '<li class="muted">No creatures found.</li>'}</ul>
+        </aside>
+        <section id="mDetail"></section>
+      </div>`;
+    $('#mSearch').oninput = e => { ui.mSearch = e.target.value; const p = e.target.selectionStart; renderBestiary(app); const i = $('#mSearch'); i.focus(); i.setSelectionRange(p, p); };
+    $('#mGroup').onchange = e => { ui.mGroup = e.target.value; renderBestiary(app); };
+    $('#mType').onchange = e => { ui.mType = e.target.value; renderBestiary(app); };
+    $('#newMonster').onclick = () => { ui.monsterEdit = 'new'; renderMonsterDetail(); };
+    app.querySelectorAll('[data-mid]').forEach(li => li.onclick = () => { ui.monsterId = li.dataset.mid; ui.monsterEdit = false; renderBestiary(app); });
+    renderMonsterDetail();
+  }
+  function renderMonsterDetail() {
+    const box = $('#mDetail'); if (!box) return;
+    if (ui.monsterEdit) return renderMonsterForm(box, ui.monsterEdit === 'new' ? null : monster(ui.monsterId));
+    const m = monster(ui.monsterId);
+    if (!m) { box.innerHTML = '<div class="panel empty">No creatures yet.</div>'; return; }
+    const places = placesFor(m);
+    box.innerHTML = `
+      <div class="row" style="justify-content:flex-start;margin-bottom:10px">
+        <button class="btn small" id="mPrint" style="flex:0">🖨 Print</button>
+        ${m.custom ? '<button class="btn small" id="mEdit" style="flex:0">✏️ Edit</button><button class="btn small danger" id="mDelete" style="flex:0">🗑 Delete</button>'
+          : '<button class="btn small" id="mCopy" style="flex:0">📄 Copy & edit</button>'}
+      </div>
+      <div class="bestiary-detail">
+        ${statBlockHtml(m)}
+        <div class="panel stack sb-side">
+          ${m.lore ? `<div><h3>📖 Lore</h3><p class="small prewrap">${esc(m.lore)}</p></div>` : ''}
+          <div><h3>📍 Where to meet it</h3>
+            <div class="small muted" style="margin-bottom:6px">${esc((m.habitats || []).join(', ') || 'Nowhere set yet')}</div>
+            <div>${places.slice(0, 40).map(L => `<a href="#" class="chip" data-mplace="${L.id}">${L.type === 'Dungeon' ? '⚱️ ' : ''}${esc(L.name)}</a>`).join('') || '<span class="muted small">No matching places.</span>'}
+            ${places.length > 40 ? `<span class="muted small">…and ${places.length - 40} more</span>` : ''}</div></div>
+        </div>
+      </div>`;
+    box.querySelectorAll('[data-mplace]').forEach(a => a.onclick = e => { e.preventDefault(); if (!showOnMap(a.dataset.mplace)) go('locations'); });
+    $('#mPrint').onclick = () => {
+      let area = $('#printArea'); if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+      area.innerHTML = statBlockHtml(m);
+      document.body.classList.add('printing');
+      const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
+      window.addEventListener('afterprint', done); setTimeout(() => { window.print(); setTimeout(done, 500); }, 50);
+    };
+    const cp = $('#mCopy'); if (cp) cp.onclick = () => {
+      const copy = JSON.parse(JSON.stringify(m)); copy.id = 'c-' + uid(); copy.custom = true; copy.name = m.name + ' (copy)'; delete copy.boss;
+      (state.monsters = state.monsters || []).push(copy); save(); ui.monsterId = copy.id; ui.monsterEdit = 'edit'; renderBestiary($('#app'));
+    };
+    const ed = $('#mEdit'); if (ed) ed.onclick = () => { ui.monsterEdit = 'edit'; renderMonsterDetail(); };
+    const de = $('#mDelete'); if (de) de.onclick = () => {
+      if (!confirm(`Delete ${m.name}?`)) return;
+      state.monsters = state.monsters.filter(x => x.id !== m.id); save(); ui.monsterId = null; renderBestiary($('#app'));
+    };
+  }
+  // simple editor: lists are written one per line as "Name. Description"
+  const listToText = l => (l || []).map(([n, t]) => `${n}. ${t.replace(/\n/g, ' / ')}`).join('\n');
+  const textToList = t => String(t || '').split('\n').map(s => s.trim()).filter(Boolean).map(s => {
+    const i = s.indexOf('. '); return i > 0 ? [s.slice(0, i), s.slice(i + 2).replace(/ \/ /g, '\n')] : [s, ''];
+  });
+  function renderMonsterForm(box, m) {
+    const isNew = !m;
+    m = m || { name: '', size: 'Medium', type: 'monstrosity', align: 'unaligned', ac: 13, acNote: '', hd: [4, 8], speed: '30 ft.', abil: [10, 10, 10, 10, 10, 10], cr: '1', habitats: [] };
+    const regions = [...new Set(state.locations.map(l => l.region).filter(Boolean))];
+    box.innerHTML = `<div class="panel">
+      <h2>${isNew ? '✨ New creature' : '✏️ Edit ' + esc(m.name)}</h2>
+      <p class="small muted">Tip: in actions you can write <code>{hit:STR}</code> for the attack bonus, <code>{dc:CON}</code> for a save DC and <code>[2d6+STR]</code> for damage — the numbers are worked out for you.</p>
+      <form id="mForm" class="stack" autocomplete="off">
+        <div class="grid2">
+          <div><label>Name *</label><input name="name" required maxlength="80" value="${esc(m.name)}"></div>
+          <div><label>Size</label><select name="size">${opts(['Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan'], m.size)}</select></div>
+          <div><label>Type</label><input name="type" value="${esc(m.type)}" placeholder="e.g. undead, beast, dragon"></div>
+          <div><label>Alignment</label><input name="align" value="${esc(m.align)}"></div>
+          <div><label>Armor Class</label><input name="ac" type="number" min="1" max="30" value="${esc(m.ac)}"></div>
+          <div><label>Armor note</label><input name="acNote" value="${esc(m.acNote || '')}" placeholder="natural armor"></div>
+          <div><label>Hit Dice (how many)</label><input name="hdN" type="number" min="1" max="60" value="${esc((m.hd || [])[0] || 4)}"></div>
+          <div><label>Hit Die size</label><select name="hdD">${[4, 6, 8, 10, 12, 20].map(d => `<option ${d === (m.hd || [])[1] ? 'selected' : ''}>${d}</option>`).join('')}</select></div>
+          <div><label>Speed</label><input name="speed" value="${esc(m.speed)}"></div>
+          <div><label>Challenge</label><select name="cr">${CRS.map(c => `<option ${String(m.cr) === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+        </div>
+        <div class="grid6">${ABIL.map((a, i) => `<div><label>${a}</label><input name="ab${i}" type="number" min="1" max="30" value="${esc((m.abil || [])[i] ?? 10)}"></div>`).join('')}</div>
+        <div class="grid2">
+          <div><label>Saving throws (e.g. DEX, CON)</label><input name="saves" value="${esc((m.saves || []).join(', '))}"></div>
+          <div><label>Skills (e.g. Perception, Stealth)</label><input name="skills" value="${esc((m.skills || []).map(s => s[0] + (s[2] === 2 ? '*' : '')).join(', '))}" placeholder="* = double proficiency"></div>
+          <div><label>Damage vulnerabilities</label><input name="vuln" value="${esc(m.vuln || '')}"></div>
+          <div><label>Damage resistances</label><input name="res" value="${esc(m.res || '')}"></div>
+          <div><label>Damage immunities</label><input name="imm" value="${esc(m.imm || '')}"></div>
+          <div><label>Condition immunities</label><input name="cimm" value="${esc(m.cimm || '')}"></div>
+          <div><label>Senses</label><input name="senses" value="${esc(m.senses || '')}" placeholder="darkvision 60 ft."></div>
+          <div><label>Languages</label><input name="lang" value="${esc(m.lang || '')}"></div>
+        </div>
+        <div><label>📍 Where it lives (places or regions, comma separated)</label><input name="habitats" list="habList" value="${esc((m.habitats || []).join(', '))}">
+          <datalist id="habList">${regions.concat(state.locations.map(l => l.name)).map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+          <div class="small muted">Regions: ${esc(regions.join(' · '))}</div></div>
+        <div><label>Traits (one per line: "Name. What it does")</label><textarea name="traits">${esc(listToText(m.traits))}</textarea></div>
+        <div><label>Actions</label><textarea name="actions">${esc(listToText(m.actions))}</textarea></div>
+        <div class="grid2">
+          <div><label>Bonus actions</label><textarea name="bonus">${esc(listToText(m.bonus))}</textarea></div>
+          <div><label>Reactions</label><textarea name="reactions">${esc(listToText(m.reactions))}</textarea></div>
+        </div>
+        <div><label>Legendary actions (leave empty if none)</label><textarea name="legendary">${esc(m.legendary ? listToText(m.legendary.actions) : '')}</textarea></div>
+        <div><label>Lore</label><textarea name="lore">${esc(m.lore || '')}</textarea></div>
+        <div class="row" style="justify-content:flex-end">
+          <button type="button" class="btn" id="mCancel" style="flex:0">Cancel</button>
+          <button type="submit" class="btn primary" style="flex:0">💾 Save creature</button>
+        </div>
+      </form></div>`;
+    $('#mCancel').onclick = () => { ui.monsterEdit = false; renderMonsterDetail(); };
+    $('#mForm').onsubmit = e => {
+      e.preventDefault();
+      const f = e.target, field = k => f.elements.namedItem(k), v = k => String(field(k).value || '').trim();
+      if (!v('name')) return toast('Your creature needs a name!');
+      const split = s => s.split(',').map(x => x.trim()).filter(Boolean);
+      const data = {
+        name: v('name'), size: v('size'), type: v('type'), align: v('align'), ac: Number(v('ac')) || 10, acNote: v('acNote'),
+        hd: [Math.max(1, Number(v('hdN')) || 1), Number(v('hdD')) || 8], speed: v('speed'), cr: v('cr'),
+        abil: ABIL.map((_, i) => Math.max(1, Math.min(30, Number(field('ab' + i).value) || 10))),
+        saves: split(v('saves')).map(s => s.toUpperCase().slice(0, 3)).filter(s => ABIL.includes(s)),
+        skills: split(v('skills')).map(s => { const exp = s.endsWith('*'); const nm = s.replace('*', '').trim(); const k = Object.keys(SKILL_ABIL).find(x => sameName(x, nm)); return k ? (exp ? [k, SKILL_ABIL[k], 2] : [k, SKILL_ABIL[k]]) : null; }).filter(Boolean),
+        vuln: v('vuln'), res: v('res'), imm: v('imm'), cimm: v('cimm'), senses: v('senses'), lang: v('lang'),
+        habitats: split(v('habitats')), lore: v('lore'),
+        traits: textToList(v('traits')), actions: textToList(v('actions')), bonus: textToList(v('bonus')), reactions: textToList(v('reactions')),
+        legendary: v('legendary') ? { intro: "The creature can take 3 legendary actions, choosing from the options below. Only one legendary action option can be used at a time and only at the end of another creature's turn. It regains spent legendary actions at the start of its turn.", actions: textToList(v('legendary')) } : null,
+        custom: true,
+      };
+      if (isNew) { data.id = 'c-' + uid(); (state.monsters = state.monsters || []).push(data); ui.monsterId = data.id; toast(`🐉 ${data.name} added to the bestiary!`); }
+      else { Object.assign(m, data); toast('Saved!'); }
+      save(); ui.monsterEdit = false; renderBestiary($('#app'));
+    };
   }
 
   // ================= TRAVEL SIMULATION =================
@@ -973,6 +1223,8 @@
         <button class="btn-x" id="pinClose" title="Close">✕</button></div>
       ${L.notes ? `<p class="small prewrap">${esc(L.notes.length > 400 ? L.notes.slice(0, 400) + '…' : L.notes)}</p>` : ''}
       <ul class="members">${people.map(p => `<li>${avatar(p, 24)} <a href="#" data-goto="${p.id}">${esc(p.name)}</a> <span class="muted small">${esc(p.occupation || '')}</span></li>`).join('') || '<li class="muted small">No NPCs here yet.</li>'}</ul>
+      <div class="small" style="margin:8px 0 4px"><b>⚔️ Possible enemies here</b> <button class="btn small" data-encounter="${L.id}">🎲 Roll encounter</button> <span data-encout="${L.id}"></span></div>
+      <div>${enemyChips(L)}</div>
       <div class="row" style="justify-content:flex-start">
         <button class="btn small" id="pinNewNpc" style="flex:0">+ NPC here</button>
         <button class="btn small" id="pinPrices" style="flex:0">💰 Prices here</button>
@@ -980,6 +1232,7 @@
         <button class="btn small danger" id="pinRemove" style="flex:0">Remove pin</button>
       </div></div>`;
     $('#pinClose').onclick = () => { ui.pinSel = null; renderMaps($('#app')); };
+    wireEnemyChips(box);
     box.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
     $('#pinNewNpc').onclick = () => { ui.npcId = null; ui.draft = null; ui.locFilter = L.id; ui.editing = true; go('npcs'); };
     $('#pinPrices').onclick = () => { window.Market.setCity(L.id); go('market'); };
@@ -993,6 +1246,9 @@
   }
 
   // ================= FAMILY TREE =================
+  // how many generations to show above the selected person (nobles: 5 by default)
+  const isNobleNpc = n => n && n.factions.some(f => { const F = faction(f.id); return F && F.type === 'Noble house'; });
+  const treeGens = () => ui.treeGens || (isNobleNpc(npc(ui.treeId)) ? 5 : 2);
   function renderTree(app) {
     if (!npc(ui.treeId)) ui.treeId = (npc(ui.npcId) || state.npcs.find(n => n.parents.length || n.spouses.length) || state.npcs[0] || {}).id || null;
     if (!state.npcs.length) { app.innerHTML = '<div class="panel empty">Add some NPCs first, then link them as family.</div>'; return; }
@@ -1001,6 +1257,8 @@
         <div class="row">
           <h2 style="margin:0;flex:0 1 auto">🌳 Family tree of</h2>
           <select id="treeSel" style="max-width:320px">${[...state.npcs].sort(byName).map(n => `<option value="${n.id}" ${n.id === ui.treeId ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>
+          <label class="small muted" style="flex:0 1 auto;margin:0">Generations back
+            <select id="treeGens" style="width:auto">${[1, 2, 3, 4, 5, 6].map(g => `<option ${g === treeGens() ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
           <button class="btn" id="treeEdit" style="flex:0">✏️ Edit family links</button>
         </div>
         <div class="legend"><span>Click a person to center the tree on them.</span>
@@ -1008,6 +1266,7 @@
         <div class="tree-wrap" id="treeWrap"></div>
       </div>`;
     $('#treeSel').onchange = e => { ui.treeId = e.target.value; renderTree(app); };
+    $('#treeGens').onchange = e => { ui.treeGens = +e.target.value; renderTree(app); };
     $('#treeEdit').onclick = () => { ui.npcId = ui.treeId; ui.editing = false; go('npcs'); };
     drawTree($('#treeWrap'));
   }
@@ -1022,14 +1281,20 @@
     const sibs = take(siblingsOf(focus.id).map(s => s.id));
     const spouses = take(focus.spouses);
     focusRow.push(...sibs, focus.id, ...spouses);
-    const parents = take(focus.parents);
-    const grand = take(parents.flatMap(p => npc(p).parents));
-    // spouses of parents who aren't already parents (step-parents)
-    const parentSpouses = take(parents.flatMap(p => npc(p).spouses));
+    // ancestors: one row per generation, as many as chosen
+    const ancestorRows = [];
+    let gen = [focus.id];
+    for (let g = 0; g < treeGens(); g++) {
+      const ps = take(gen.flatMap(id => npc(id).parents));
+      if (!ps.length) break;
+      const steps = g === 0 ? take(ps.flatMap(p => npc(p).spouses)) : []; // step-parents
+      ancestorRows.unshift([...ps, ...steps]);
+      gen = ps;
+    }
     const kids = take([focus.id, ...spouses].flatMap(id => childrenOf(id).map(c => c.id)));
     const kidSpouses = take(kids.flatMap(k => npc(k).spouses));
     const grandkids = take(kids.concat(kidSpouses).flatMap(id => childrenOf(id).map(c => c.id)));
-    const rows = [grand, [...parents, ...parentSpouses], focusRow, [...kids, ...kidSpouses], grandkids].filter(r => r.length);
+    const rows = [...ancestorRows, focusRow, [...kids, ...kidSpouses], grandkids].filter(r => r.length);
 
     const W = 160, H = 58, GX = 22, GY = 70, PAD = 24;
     const maxCols = Math.max(...rows.map(r => r.length));
@@ -1141,7 +1406,7 @@
       } catch (err) { toast("⚠️ That file doesn't look like a World Keeper backup."); }
     };
     $('#sampleBtn').onclick = () => { if (confirm('Replace EVERYTHING with the starting Frindeval world? Your own changes will be lost.')) { state = sampleWorld(); save(); ui.npcId = ui.treeId = null; toast('Frindeval loaded.'); renderSettings(app); } };
-    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 3, frindeval: WORLD_VERSION, npcs: [], locations: [], factions: [], roads: [], sim: { day: 0, log: [] }, maps: state.maps.map(m => ({ ...m, pins: {} })) }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
+    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 3, frindeval: WORLD_VERSION, npcs: [], locations: [], factions: [], roads: [], monsters: state.monsters || [], sim: { day: 0, log: [] }, maps: state.maps.map(m => ({ ...m, pins: {} })) }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
     $('#marketReset').onclick = () => { if (confirm('Reset the market back to "war started 14 days ago"?')) { window.Market.reset(); toast('Market reset.'); } };
     renderCloudPanel();
   }
@@ -1352,6 +1617,8 @@
     el.className = 'sync ' + s;
     el.hidden = s === 'local';
     const cs = $('#cloudState'); if (cs) cs.textContent = syncText(s, msg);
+    // the player link only exists after the first upload — show it as soon as it's ready
+    if (s === 'synced' && $('#cloudPanel') && !$('#playerLink') && window.Cloud && window.Cloud.user && window.Cloud.playerLink()) renderCloudPanel();
   }
 
   // The player-safe copy: ONLY what players are allowed to see. No secrets ever go in here.
