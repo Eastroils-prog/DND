@@ -34,18 +34,24 @@ No server, no account, free. Hosted on GitHub Pages.
 - ✅ Relationships beyond family: friend, rival, enemy, lover, employer/employee, mentor/student, owes money, secretly hates… (with notes)
 - ✅ Printable NPC cards: player copy (no secrets) or DM copy, for one NPC, everyone in a location, or a whole faction
 
-**Phase 2.5 — ideas for later**
-- Relationship web picture (who likes/hates who)
-- Random NPC generator (no AI needed)
-- Market items only sold in certain cities
+**Phase 3 — Full restaurant with front & back of house (DONE — needs your Supabase account, see SETUP.md)**
+- ✅ Back of house: Supabase database. Your world syncs between phone + laptop. Works offline and catches up later.
+- ✅ Locked door: login with email + password. Database rules (Row Level Security) mean only you can read or change your world.
+- ✅ Dining room: a player-view link (`player.html`). Players see only NPCs marked "👁 Players have met", non-secret places,
+  public factions and the live market. They never see secret notes, alignments, hidden NPCs or secret relationships.
+  You can make a new link at any time, and the old one stops working.
+- ✅ AI chef: "🤖 AI NPC" writes an NPC (plus family) from your idea, using Claude in a Supabase Edge Function. The API key
+  stays on the server, and only emails on your guest list can use it.
+- ✅ Free extra: "🎲 Random NPC" generator (no AI, works offline)
 
-**Phase 3 — Full restaurant with front & back of house**
-- Back of house (kitchen): a real database (e.g. Supabase) so your world lives in the cloud and syncs between phone + laptop
-- Front of house (dining room): login, and a "player view" where players only see what you allow (no secret notes!)
-- AI helper: "generate a random tavern keeper with a family"
+**Phase 4 — ideas for later**
+- Relationship web picture (who likes/hates who)
+- Session notes / timeline ("what happened in session 12")
+- Players can leave notes on NPCs they've met
+- Market items only sold in certain cities; shop inventories per NPC merchant
 
 ## Testing checklist (we test as we go)
 1. ✅ Page loads with no errors
 2. ✅ Buttons and forms work (add/edit/delete NPC, locations, relationships, market controls)
-3. ⏳ Real APIs (Phase 3 — there are none yet, by design)
+3. ✅ Real APIs: login, sync, player link and AI tested end-to-end against a pretend Supabase. Real test = SETUP.md
 4. ✅ Security: everything you type is "escaped" so typing `<script>` into a name can't break or hack the page

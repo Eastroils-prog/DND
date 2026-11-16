@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Player View — World Keeper</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🎭 Player View</div>
+    <nav class="tabs" id="tabs">
+      <a href="#people" data-tab="people">🧙 People</a>
+      <a href="#places" data-tab="places">🏰 Places</a>
+      <a href="#market" data-tab="market">💰 Market</a>
+    </nav>
+    <span id="updated" class="small muted"></span>
+  </header>
+  <main id="app"><div class="panel empty">Loading the world…</div></main>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="market.js"></script>
+  <script src="player.js"></script>
+</body>
+</html>

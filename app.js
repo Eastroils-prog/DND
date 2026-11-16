@@ -66,6 +66,8 @@
     const world = { version: 2, locations: [oak, inn, keep, port], factions: [smiths, eyes, guild], npcs: [durgan, brom, hilda, torin, mara, elsa, vex] };
     const link = (a, t, b) => { a.bonds.push({ id: b.id, type: t, note: '' }); b.bonds.push({ id: a.id, type: BONDS[t], note: '' }); };
     link(elsa, 'Best friend', hilda); link(mara, 'Mentor', brom); link(brom, 'Enemy', vex); link(elsa, 'Secretly hates', vex);
+    [durgan, brom, hilda, torin, mara, elsa].forEach(n => { n.known = true; });
+    smiths.public = true; guild.public = true;
     return world;
   }
   function normalize(s) {
@@ -82,17 +84,21 @@
       n.bonds = n.bonds.filter(b => b && BONDS[b.type]);
       n.factions = n.factions.filter(f => f && f.id);
     });
-    s.factions.forEach(f => { if (!/^#[0-9a-fA-F]{6}$/.test(f.color)) f.color = '#c98a3d'; });
+    s.factions.forEach(f => { if (!/^#[0-9a-fA-F]{6}$/.test(f.color)) f.color = '#c98a3d'; f.public = f.public === true; });
+    s.npcs.forEach(n => { n.known = n.known === true; });
+    s.locations.forEach(l => { l.hidden = l.hidden === true; });
     return s;
   }
   function load() {
     try { const raw = localStorage.getItem(STORE_KEY); if (raw) return normalize(JSON.parse(raw)); } catch (e) { /* ignore */ }
     return sampleWorld();
   }
-  function save() {
+  function saveLocal() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { toast('⚠️ Could not save (browser storage full or blocked)'); }
   }
-  let state = load(); save();
+  // every change: save in this browser, then tell the cloud (if you're logged in it uploads a moment later)
+  function save() { saveLocal(); if (window.Cloud) window.Cloud.changed(); }
+  let state = load(); saveLocal();
 
   const npc = id => state.npcs.find(n => n.id === id);
   const loc = id => state.locations.find(l => l.id === id);
@@ -229,7 +235,7 @@
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab !== 'market') window.Market.stop();
     const app = $('#app');
-    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings }[tab] || renderNpcs)(app);
+    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings, cloud: renderSettings }[tab] || renderNpcs)(app);
   }
   // lets the market read your locations (for city prices)
   window.World = { locations: () => state.locations, esc };
@@ -244,6 +250,10 @@
         <aside class="panel">
           <div class="row"><h2 style="margin:0">NPCs <span class="muted small">(${state.npcs.length})</span></h2>
             <button class="btn primary" id="newNpc" style="flex:0">+ New NPC</button></div>
+          <div class="row" style="margin-top:8px">
+            <button class="btn small" id="randNpc" title="Make up a random NPC instantly (no internet needed)">🎲 Random NPC</button>
+            <button class="btn small" id="aiNpc" title="Describe an NPC and let the AI write it">🤖 AI NPC</button>
+          </div>
           <div class="stack" style="margin-top:12px">
             <input id="npcSearch" placeholder="🔍 Search name, job, race…" value="${esc(ui.search)}">
             <select id="npcLoc"><option value="">📍 All locations</option><option value="__none" ${ui.locFilter === '__none' ? 'selected' : ''}>Unknown / wandering</option>
@@ -253,7 +263,9 @@
         </aside>
         <section class="panel" id="npcDetail"></section>
       </div>`;
-    $('#newNpc').onclick = () => { ui.npcId = null; ui.editing = true; renderNpcDetail(); };
+    $('#newNpc').onclick = () => { ui.npcId = null; ui.draft = null; ui.editing = true; renderNpcDetail(); };
+    $('#randNpc').onclick = () => { ui.npcId = null; ui.draft = randomNpc(confirm('Give them a family too?\n\nOK = yes, with family\nCancel = just one NPC')); ui.editing = true; renderNpcList(); renderNpcDetail(); };
+    $('#aiNpc').onclick = () => { ui.npcId = null; ui.editing = false; ui.draft = null; renderNpcList(); renderAiPanel(); };
     $('#npcSearch').oninput = e => { ui.search = e.target.value; renderNpcList(); };
     $('#npcLoc').onchange = e => { ui.locFilter = e.target.value; renderNpcList(); };
     renderNpcList(); renderNpcDetail();
@@ -322,6 +334,7 @@
       <div class="row" style="margin-top:8px;justify-content:flex-start">
         <button class="btn small" id="printPlayer" style="flex:0">🖨 Player card</button>
         <button class="btn small" id="printDm" style="flex:0">🖨 DM card (with secrets)</button>
+        <button class="btn small" id="toggleKnown" style="flex:0" title="Decide if players can see this NPC in the player view">${n.known ? '👁 Players know them — hide' : '🙈 Hidden from players — show'}</button>
         ${n.portrait ? '<button class="btn small danger" id="rmPortrait" style="flex:0">Remove picture</button>' : ''}
       </div>
       <div class="stack" style="margin-top:14px">
@@ -368,6 +381,7 @@
         </div>
       </div>`;
     $('#printPlayer').onclick = () => printNpcs([n], false);
+    $('#toggleKnown').onclick = () => { n.known = !n.known; save(); toast(n.known ? '👁 Players can now see this NPC (no secrets).' : '🙈 Hidden from the player view.'); renderNpcDetail(); };
     $('#printDm').onclick = () => printNpcs([n], true);
     $('#portraitFile').onchange = async e => {
       try { n.portrait = await readPortrait(e.target.files[0]); save(); toast('📷 Picture added!'); renderNpcList(); renderNpcDetail(); }
@@ -410,9 +424,12 @@
 
   function renderNpcForm(box, n) {
     const isNew = !n;
-    n = n || { name: '', race: 'Human', gender: '', age: '', occupation: '', alignment: 'True Neutral', status: 'Alive', locationId: ui.locFilter && ui.locFilter !== '__none' ? ui.locFilter : '', description: '', notes: '' };
+    const draft = isNew ? ui.draft : null;
+    n = n || { name: '', race: 'Human', gender: '', age: '', occupation: '', alignment: 'True Neutral', status: 'Alive', locationId: ui.locFilter && ui.locFilter !== '__none' ? ui.locFilter : '', description: '', notes: '', known: false, ...(draft ? draft.fields : {}) };
+    const rels = draft ? draft.relatives : [];
     box.innerHTML = `
-      <h2>${isNew ? '✨ New NPC' : '✏️ Edit ' + esc(n.name)}</h2>
+      <h2>${isNew ? (draft ? `${draft.ai ? '🤖' : '🎲'} Check your new NPC, then save` : '✨ New NPC') : '✏️ Edit ' + esc(n.name)}</h2>
+      ${draft ? '<p class="small muted" style="margin-top:-6px">Change anything you like before saving. Not happy? Press the button again for another one.</p>' : ''}
       <form id="npcForm" class="stack" autocomplete="off">
         <div><label>Name *</label><input name="name" required maxlength="80" value="${esc(n.name)}" placeholder="e.g. Gundren Rockseeker"></div>
         <div class="grid2">
@@ -429,22 +446,30 @@
           <div class="small muted" style="margin-top:4px">Need a new place? Add it in the 🏰 Locations tab.</div></div>
         <div><label>Description (looks, personality, voice)</label><textarea name="description" maxlength="4000">${esc(n.description)}</textarea></div>
         <div><label>🤫 Secret DM notes (plots, secrets)</label><textarea name="notes" maxlength="4000">${esc(n.notes)}</textarea></div>
+        <label class="check"><input type="checkbox" name="known" ${n.known ? 'checked' : ''}> 👁 Players have met this NPC <span class="muted small">(shows in the player view, without secrets)</span></label>
+        ${rels.length ? `<div class="field-view">
+          <label class="check" style="margin-bottom:6px"><input type="checkbox" id="addRels" checked> 👪 Also add their family (${rels.length})</label>
+          <ul class="small" style="margin:0;padding-left:20px">${rels.map(r => `<li><b>${esc(r.relation)}</b>: ${esc(r.name)} — ${esc([r.race, r.age && 'age ' + r.age, r.occupation].filter(Boolean).join(', '))}</li>`).join('')}</ul></div>` : ''}
         <div class="row" style="justify-content:flex-end">
           <button type="button" class="btn" id="cancelNpc" style="flex:0">Cancel</button>
           <button type="submit" class="btn primary" style="flex:0">💾 Save NPC</button>
         </div>
       </form>`;
-    $('#cancelNpc').onclick = () => { ui.editing = false; renderNpcDetail(); };
+    $('#cancelNpc').onclick = () => { ui.editing = false; ui.draft = null; renderNpcDetail(); };
     $('#npcForm').onsubmit = e => {
       e.preventDefault();
       const f = Object.fromEntries(new FormData(e.target).entries());
       Object.keys(f).forEach(k => f[k] = String(f[k]).trim());
       if (!f.name) return toast('Your NPC needs a name!');
       f.locationId = f.locationId || null;
+      f.known = e.target.known.checked;
       if (isNew) {
         const created = { id: uid(), parents: [], spouses: [], siblings: [], bonds: [], factions: [], portrait: '', ...f };
         state.npcs.push(created); ui.npcId = created.id;
-        toast(`✨ ${f.name} joins your world!`);
+        const addRels = $('#addRels');
+        if (rels.length && addRels && addRels.checked) createRelatives(created, rels);
+        toast(`✨ ${f.name} joins your world!${rels.length && addRels && addRels.checked ? ` (with ${rels.length} family members)` : ''}`);
+        ui.draft = null;
       } else {
         Object.assign(npc(n.id), f); toast('Saved!');
       }
@@ -470,6 +495,7 @@
             <div><label>⚔️ How close is the war?</label><select name="warExposure">${numOpts(EXPOSURE, l.warExposure)}</select></div>
           </div>
           <div><label>Notes</label><textarea name="notes" maxlength="4000" style="min-height:60px">${esc(l.notes)}</textarea></div>
+          <label class="check"><input type="checkbox" name="hidden" ${l.hidden ? 'checked' : ''}> 🙈 Secret place (hide from the player view)</label>
           <div class="row" style="justify-content:flex-end">
             ${editing ? '<button type="button" class="btn" id="cancelLoc" style="flex:0">Cancel</button>' : ''}
             <button class="btn primary" type="submit" style="flex:0">${editing ? '💾 Save' : '+ Add location'}</button>
@@ -485,6 +511,7 @@
             ${L.notes ? `<p class="small prewrap">${esc(L.notes)}</p>` : ''}
             <div class="small" style="margin-top:6px"><b>${people.length}</b> NPC${people.length === 1 ? '' : 's'} here:</div>
             <ul>${people.map(p => `<li><a href="#" data-goto="${p.id}">${esc(p.name)}</a> <span class="muted small">${esc(p.occupation || '')}</span></li>`).join('') || '<li class="muted small">nobody yet</li>'}</ul>
+            ${L.hidden ? '<span class="badge missing">🙈 secret place</span>' : ''}
             <div class="small muted">💰 ${esc(labelOf(PRICE_LEVELS, L.priceMod))} prices · ⚔️ ${esc(labelOf(EXPOSURE, L.warExposure))}</div>
             <div class="row" style="margin-top:8px">
               <button class="btn small" data-prices="${L.id}">💰 Prices here</button>
@@ -503,6 +530,7 @@
       Object.keys(f).forEach(k => f[k] = String(f[k]).trim());
       if (!f.name) return toast('The location needs a name!');
       f.priceMod = Number(f.priceMod) || 1; f.warExposure = Number(f.warExposure) || 1;
+      f.hidden = e.target.hidden.checked;
       if (editing) { Object.assign(editing, f); toast('Saved!'); }
       else { state.locations.push({ id: uid(), ...f }); toast(`🏰 ${f.name} added to the map!`); }
       ui.editLocId = null; save(); renderLocations(app);
@@ -539,6 +567,7 @@
             <div><label>Type</label><select name="type">${opts(FACTION_TYPES, f.type)}</select></div>
             <div><label>Headquarters</label><select name="hqId"><option value="">Unknown / none</option>
               ${[...state.locations].sort(byName).map(l => `<option value="${l.id}" ${l.id === f.hqId ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>
+            <div><label>Players know it exists?</label><label class="check" style="margin-top:8px"><input type="checkbox" name="public" ${f.public ? 'checked' : ''}> 👁 Yes, show in the player view</label></div>
             <div><label>Banner color</label><input type="color" name="color" value="${esc(f.color)}" style="height:40px;padding:3px"></div>
           </div>
           <div class="grid2">
@@ -557,7 +586,7 @@
           const nonMembers = state.npcs.filter(n => !members.includes(n)).sort(byName);
           return `<div class="panel loc-card fac-card ${ui.facId === F.id ? 'sel' : ''}" id="fac-${F.id}" style="border-top:4px solid ${F.color}">
             <h3>${esc(F.name)}</h3>
-            <div class="small muted">${esc(F.type)}${hq ? ' · 🏠 ' + esc(hq.name) : ''}</div>
+            <div class="small muted">${esc(F.type)}${hq ? ' · 🏠 ' + esc(hq.name) : ''} · ${F.public ? '👁 public' : '🙈 secret'}</div>
             ${F.goals ? `<p class="small prewrap"><b>Goals:</b> ${esc(F.goals)}</p>` : ''}
             ${F.notes ? `<p class="small prewrap field-view secret">🤫 ${esc(F.notes)}</p>` : ''}
             <div class="small" style="margin-top:6px"><b>${members.length}</b> member${members.length === 1 ? '' : 's'}:</div>
@@ -583,6 +612,7 @@
       if (!d.name) return toast('The faction needs a name!');
       if (!/^#[0-9a-fA-F]{6}$/.test(d.color)) d.color = '#c98a3d';
       d.hqId = d.hqId || null;
+      d.public = e.target.public.checked;
       if (editing) { Object.assign(editing, d); toast('Saved!'); }
       else { state.factions.push({ id: uid(), ...d }); toast(`⚜️ ${d.name} has been founded!`); }
       ui.editFacId = null; save(); renderFactions(app);
@@ -723,10 +753,11 @@
   // ================= BACKUP / SETTINGS =================
   function renderSettings(app) {
     app.innerHTML = `
+      <div class="panel stack" style="max-width:700px;margin-bottom:16px" id="cloudPanel"></div>
       <div class="panel stack" style="max-width:700px">
-        <h2>⚙️ Backup your world</h2>
-        <p>Your world is saved <b>inside this web browser</b> on this device. If you clear your browser data or switch devices,
-        it won't be there. So download a backup now and then!</p>
+        <h2>💾 Backup your world</h2>
+        <p>Your world is always saved <b>inside this web browser</b>${window.Cloud && window.Cloud.user ? ' <b>and</b> in the cloud' : ''}.
+        A backup file is extra safety — download one now and then!</p>
         <div class="row">
           <button class="btn primary" id="exportBtn" style="flex:0">⬇️ Download backup</button>
           <label class="btn" style="flex:0;margin:0;color:var(--text)">⬆️ Load backup<input type="file" id="importFile" accept=".json,application/json" hidden></label>
@@ -761,7 +792,259 @@
     $('#sampleBtn').onclick = () => { if (confirm('Replace everything with the example world?')) { state = sampleWorld(); save(); ui.npcId = ui.treeId = null; toast('Example world loaded.'); renderSettings(app); } };
     $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 2, npcs: [], locations: [], factions: [] }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
     $('#marketReset').onclick = () => { if (confirm('Reset the market back to "war started 14 days ago"?')) { window.Market.reset(); toast('Market reset.'); } };
+    renderCloudPanel();
+  }
+
+  // ================= NPC GENERATORS =================
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const R = {
+    races: ['Human', 'Human', 'Human', 'Elf', 'Dwarf', 'Halfling', 'Gnome', 'Half-Elf', 'Half-Orc', 'Tiefling', 'Dragonborn'],
+    first: {
+      Human: ['Aldo', 'Bryn', 'Cora', 'Dain', 'Edda', 'Finn', 'Greta', 'Hal', 'Ilsa', 'Jory', 'Kara', 'Lenn', 'Mira', 'Nils', 'Orla', 'Pell', 'Rhea', 'Sten', 'Tamsin', 'Wren'],
+      Elf: ['Aelar', 'Caelynn', 'Erevan', 'Ilyana', 'Lia', 'Naivara', 'Quarion', 'Sariel', 'Thamior', 'Valanthe'],
+      Dwarf: ['Adrik', 'Dagna', 'Eberk', 'Gunnloda', 'Hlin', 'Kildrak', 'Mardred', 'Rurik', 'Vistra', 'Torbera'],
+      Halfling: ['Andry', 'Bree', 'Cade', 'Eldon', 'Kithri', 'Lavinia', 'Merric', 'Nedda', 'Roscoe', 'Seraphina'],
+      Gnome: ['Alston', 'Bimpnottin', 'Carlin', 'Ellyjobell', 'Frug', 'Nissa', 'Orryn', 'Roywyn', 'Wrenn', 'Zook'],
+      'Half-Orc': ['Dench', 'Engong', 'Holg', 'Kansif', 'Myev', 'Ovak', 'Shautha', 'Thokk', 'Vola', 'Yevelda'],
+      Tiefling: ['Akmenos', 'Bryseis', 'Damakos', 'Kallista', 'Lerissa', 'Mordai', 'Nemeia', 'Orianna', 'Skamos', 'Rieta'],
+      Dragonborn: ['Arjhan', 'Biri', 'Donaar', 'Harann', 'Kava', 'Medrash', 'Sora', 'Thava', 'Torinn', 'Uadjit'],
+    },
+    last: ['Ashdown', 'Brightwater', 'Cobb', 'Dunmore', 'Fairweather', 'Greaves', 'Hollis', 'Marsh', 'Thorne', 'Wexley', 'Stonehill',
+      'Goodbarrel', 'Tealeaf', 'Underbough', 'Ironfist', 'Galanodel', 'Amakiir', 'Kerrhylon', 'Quill', 'Rookwood'],
+    age: { Human: [18, 70], 'Half-Elf': [20, 150], Elf: [100, 600], Dwarf: [40, 300], Halfling: [20, 120], Gnome: [40, 400], 'Half-Orc': [16, 60], Tiefling: [18, 90], Dragonborn: [15, 70] },
+    jobs: ['Baker', 'Blacksmith', 'Innkeeper', 'Barmaid', 'Fishmonger', 'Herbalist', 'Town guard', 'Priest', 'Scribe', 'Fence', 'Stablehand',
+      'Merchant', 'Farmer', 'Miller', 'Tailor', 'Carpenter', 'Bard', 'Gravedigger', 'Tax collector', 'Ferryman', 'Alchemist', 'Recruiting sergeant', 'Smuggler', 'Refugee'],
+    looks: ['has a crooked nose and a booming laugh', 'is missing two fingers on the left hand', 'wears far too much perfume', 'has ink-stained fingers',
+      'has a burn scar across one cheek', 'always wears a faded blue scarf', 'is unusually tall and stoops through doorways', 'has bright, nervous eyes',
+      'is covered in flour', 'has a soldier\'s posture'],
+    manner: ['Talks very fast when nervous.', 'Never makes eye contact.', 'Calls everyone "friend".', 'Hums old war songs.', 'Laughs at their own jokes.',
+      'Whispers, as if someone is listening.', 'Is extremely polite — suspiciously so.', 'Complains about prices constantly.', 'Quotes scripture at odd moments.',
+      'Bites their nails.'],
+    wants: ['Wants to get their family out of town before the war arrives.', 'Wants to get rich selling to the army.', 'Wants revenge on a local noble.',
+      'Wants to find a missing brother who joined the army.', 'Wants a quiet life, and nobody will give them one.', 'Wants to be famous.',
+      'Wants to pay off a debt to dangerous people.'],
+    secrets: ['Is secretly a spy for the enemy.', 'Deserted from the army and is hiding under a false name.', 'Hoards food in the cellar while neighbours go hungry.',
+      'Owes 200 gp to the thieves\' guild.', 'Knows a hidden tunnel under the town walls.', 'Is in love with someone they should not be.',
+      'Sells watered-down healing potions.', 'Witnessed a murder and is too scared to tell.', 'Is the true heir of a fallen noble house.'],
+  };
+  function randomPerson(race, opts = {}) {
+    race = race || pick(R.races);
+    const firsts = R.first[race] || R.first.Human;
+    const [lo, hi] = opts.ageRange || R.age[race] || R.age.Human;
+    const look = pick(R.looks);
+    return {
+      name: `${pick(firsts)} ${opts.last || pick(R.last)}`, race, gender: opts.gender || pick(['Male', 'Female']),
+      age: String(lo + Math.floor(Math.random() * Math.max(1, hi - lo))), occupation: opts.job || pick(R.jobs),
+      description: `${look[0].toUpperCase()}${look.slice(1)}. ${pick(R.manner)}`,
+    };
+  }
+  function randomNpc(withFamily) {
+    const p = randomPerson();
+    const fields = { ...p, alignment: pick(ALIGNMENTS.slice(0, 9)), status: 'Alive', description: `${p.description} ${pick(R.wants)}`, notes: pick(R.secrets),
+      locationId: state.locations.length ? pick(state.locations).id : '', known: false };
+    const relatives = [];
+    if (withFamily) {
+      const last = p.name.split(' ').slice(1).join(' ');
+      const age = parseInt(p.age, 10), [lo, hi] = R.age[p.race] || R.age.Human;
+      relatives.push({ relation: 'spouse', ...randomPerson(p.race, { last, gender: p.gender === 'Male' ? 'Female' : 'Male', ageRange: [Math.max(lo, age - 8), Math.min(hi, age + 8)] }) });
+      const kids = 1 + Math.floor(Math.random() * 3);
+      const kidMax = Math.max(lo / 4, age - lo);
+      for (let i = 0; i < kids; i++) relatives.push({ relation: 'child', ...randomPerson(p.race, { last, ageRange: [1, Math.max(2, kidMax)], job: 'Child' }) });
+    }
+    return { fields, relatives, ai: false };
+  }
+  // Turn a "relatives" list from a generator into real NPCs linked to the new NPC
+  function createRelatives(main, rels) {
+    let spouse = null;
+    const made = rels.map(r => {
+      const rel = { id: uid(), parents: [], spouses: [], siblings: [], bonds: [], factions: [], portrait: '', alignment: 'True Neutral', status: 'Alive', notes: '',
+        known: false, locationId: main.locationId, name: String(r.name || 'Unnamed').slice(0, 80), race: String(r.race || '').slice(0, 40),
+        gender: String(r.gender || '').slice(0, 30), age: String(r.age || '').slice(0, 20), occupation: String(r.occupation || '').slice(0, 60),
+        description: String(r.description || '').slice(0, 4000) };
+      state.npcs.push(rel);
+      if (r.relation === 'spouse' && !spouse) spouse = rel;
+      return [r.relation, rel];
+    });
+    made.forEach(([relation, rel]) => {
+      if (relation === 'spouse') addRelation(main.id, 'spouse', rel.id);
+      else if (relation === 'child') { addRelation(main.id, 'child', rel.id); if (spouse) addRelation(spouse.id, 'child', rel.id); }
+      else if (relation === 'parent') addRelation(main.id, 'parent', rel.id);
+      else addRelation(main.id, 'sibling', rel.id);
+    });
+  }
+
+  function renderAiPanel() {
+    const box = $('#npcDetail'); if (!box) return;
+    const ready = window.Cloud && window.Cloud.configured && window.Cloud.user;
+    box.innerHTML = `
+      <h2>🤖 Ask the AI for an NPC</h2>
+      ${ready ? '' : `<div class="field-view secret small">The AI helper needs the cloud (Phase 3). ${window.Cloud && window.Cloud.configured
+        ? 'Log in first in the <a href="#cloud">☁️ Cloud</a> tab.' : 'Follow <b>SETUP.md</b> to switch it on. Until then, try 🎲 Random NPC — it works without internet.'}</div>`}
+      <form id="aiForm" class="stack" autocomplete="off" style="margin-top:12px">
+        <div><label>Describe who you want</label>
+          <textarea name="idea" maxlength="600" placeholder="e.g. a nervous tavern keeper who is secretly hiding an enemy soldier in the cellar"></textarea></div>
+        <label class="check"><input type="checkbox" name="withFamily" checked> 👪 Give them a family too</label>
+        <div class="row" style="justify-content:flex-end">
+          <button type="button" class="btn" id="aiCancel" style="flex:0">Cancel</button>
+          <button type="submit" class="btn primary" id="aiGo" style="flex:0" ${ready ? '' : 'disabled'}>🤖 Create NPC</button>
+        </div>
+        <p class="small muted">Takes about 10–30 seconds. You can check and change everything before it's saved.</p>
+      </form>`;
+    $('#aiCancel').onclick = () => renderNpcDetail();
+    $('#aiForm').onsubmit = async e => {
+      e.preventDefault();
+      const btn = $('#aiGo'); btn.disabled = true; btn.textContent = '🧙 Thinking…';
+      const fd = new FormData(e.target);
+      const fw = window.Market._state();
+      try {
+        const out = await window.Cloud.generateNpc({
+          idea: String(fd.get('idea') || '').trim(), withFamily: e.target.withFamily.checked,
+          locations: state.locations.map(l => l.name),
+          worldNote: fw.events.some(ev => ev.level > 0) ? 'A war started recently. Prices are rising and refugees are arriving.' : 'The realm is at peace.',
+        });
+        const L = state.locations.find(l => l.name.toLowerCase() === String(out.location || '').toLowerCase());
+        ui.draft = {
+          ai: true,
+          fields: { name: out.name, race: out.race, gender: out.gender, age: String(out.age || ''), occupation: out.occupation,
+            alignment: ALIGNMENTS.includes(out.alignment) ? out.alignment : 'True Neutral', status: 'Alive',
+            description: out.description, notes: out.secret, locationId: L ? L.id : '', known: false },
+          relatives: Array.isArray(out.relatives) ? out.relatives.slice(0, 6) : [],
+        };
+        ui.editing = true; renderNpcDetail();
+      } catch (err) {
+        toast('⚠️ ' + err.message); btn.disabled = false; btn.textContent = '🤖 Create NPC';
+      }
+    };
+  }
+
+  // ================= CLOUD (login, sync, player link) =================
+  function renderCloudPanel() {
+    const box = $('#cloudPanel'); if (!box) return;
+    const C = window.Cloud;
+    if (!C || !C.configured) {
+      box.innerHTML = `
+        <h2>☁️ Cloud — not switched on yet</h2>
+        <p>Right now your world only lives in this browser. Switch on the cloud to:</p>
+        <ul><li>📱💻 use the same world on your phone and laptop</li><li>🔐 log in so only you can change it</li>
+        <li>🎭 send your players a link to a <b>player view</b> (no secrets!)</li><li>🤖 let the AI write NPCs for you</li></ul>
+        <p>Follow the steps in <b>SETUP.md</b> in your GitHub repository (about 20 minutes, free).</p>`;
+      return;
+    }
+    if (!C.user) {
+      box.innerHTML = `
+        <h2>☁️ Log in</h2>
+        <p class="small muted">Log in to save your world in the cloud and use it on all your devices.</p>
+        <form id="loginForm" class="stack" autocomplete="on">
+          <div><label>Email</label><input name="email" type="email" required autocomplete="email"></div>
+          <div><label>Password (at least 8 characters)</label><input name="password" type="password" required minlength="8" autocomplete="current-password"></div>
+          <div class="row" style="justify-content:flex-start">
+            <button class="btn primary" type="submit" style="flex:0">Log in</button>
+            <button class="btn" type="button" id="signupBtn" style="flex:0">Create account</button>
+          </div>
+        </form>`;
+      const form = $('#loginForm');
+      const creds = () => ({ email: form.email.value.trim(), password: form.password.value });
+      form.onsubmit = async e => {
+        e.preventDefault();
+        try { const c = creds(); await C.signIn(c.email, c.password); toast('Welcome back!'); setTimeout(() => renderSettings($('#app')), 300); }
+        catch (err) { toast('⚠️ ' + err.message); }
+      };
+      $('#signupBtn').onclick = async () => {
+        if (!form.reportValidity()) return;
+        try {
+          const c = creds(); const r = await C.signUp(c.email, c.password);
+          toast(r === 'check-email' ? '📧 Check your email and click the link, then log in here.' : 'Account created!');
+          setTimeout(() => renderSettings($('#app')), 300);
+        } catch (err) { toast('⚠️ ' + err.message); }
+      };
+      return;
+    }
+    const link = C.playerLink();
+    box.innerHTML = `
+      <h2>☁️ Cloud</h2>
+      <p>Logged in as <b>${esc(C.user.email)}</b> · <span id="cloudState">${esc(syncText(C.status, C.statusMsg))}</span></p>
+      <div class="row" style="justify-content:flex-start">
+        <button class="btn" id="syncNow" style="flex:0">🔄 Sync now</button>
+        <button class="btn" id="logout" style="flex:0">Log out</button>
+      </div>
+      <hr style="border-color:var(--line)">
+      <h3>🎭 Player view</h3>
+      <p class="small">Send this link to your players. They see NPCs marked <b>👁 Players have met</b>, places that aren't secret, public factions and the market.
+      They <b>never</b> see secret notes, alignments, hidden NPCs or secret relationships. It updates when you save.</p>
+      ${link ? `<div class="row"><input id="playerLink" readonly value="${esc(link)}" style="flex:3 1 260px">
+        <button class="btn primary" id="copyLink" style="flex:0">📋 Copy</button>
+        <a class="btn" href="${esc(link)}" target="_blank" rel="noopener" style="flex:0;text-decoration:none">Open</a></div>
+        <p class="small muted">Link leaked to the wrong people? <button class="btn small danger" id="newLink">Make a new link</button> (the old one stops working)</p>`
+        : '<p class="small muted">Your link appears after the first sync.</p>'}
+      <p class="small muted">${state.npcs.filter(n => n.known).length} of ${state.npcs.length} NPCs are visible to players.</p>`;
+    $('#syncNow').onclick = () => C.push();
+    $('#logout').onclick = async () => { await C.signOut(); toast('Logged out. Your world stays on this device.'); renderSettings($('#app')); };
+    const cp = $('#copyLink');
+    if (cp) cp.onclick = async () => {
+      try { await navigator.clipboard.writeText(link); toast('📋 Link copied!'); } catch (e) { $('#playerLink').select(); toast('Select the link and copy it.'); }
+    };
+    const nl = $('#newLink');
+    if (nl) nl.onclick = async () => {
+      if (!confirm('Make a new player link? The old link will stop working.')) return;
+      try { await C.regenerateLink(); toast('New link made.'); renderSettings($('#app')); } catch (e) { toast('⚠️ ' + e.message); }
+    };
+  }
+
+  function syncText(s, msg) {
+    return ({ local: '', 'signed-out': '☁️ Not logged in', pending: '⏳ Saving…', syncing: '🔄 Syncing…',
+      synced: '☁️ Saved to cloud', error: '⚠️ Not synced' }[s] || '') + (s === 'error' && msg ? ' — ' + msg : '');
+  }
+  function renderSync(s, msg) {
+    const el = $('#syncStatus'); if (!el) return;
+    el.textContent = syncText(s, '');
+    el.title = msg || '';
+    el.className = 'sync ' + s;
+    el.hidden = s === 'local';
+    const cs = $('#cloudState'); if (cs) cs.textContent = syncText(s, msg);
+  }
+
+  // The player-safe copy: ONLY what players are allowed to see. No secrets ever go in here.
+  const SECRET_BONDS = ['Secretly hates', 'Is secretly hated by'];
+  function buildPlayerData() {
+    const known = state.npcs.filter(n => n.known), kid = new Set(known.map(n => n.id));
+    const locations = state.locations.filter(l => !l.hidden)
+      .map(({ id, name, type, region, priceMod, warExposure }) => ({ id, name, type, region, priceMod, warExposure }));
+    const lid = new Set(locations.map(l => l.id));
+    const factions = state.factions.filter(f => f.public).map(({ id, name, type, color }) => ({ id, name, type, color }));
+    const fid = new Set(factions.map(f => f.id));
+    const m = window.Market._state();
+    return {
+      version: 1,
+      npcs: known.map(n => ({
+        id: n.id, name: n.name, race: n.race, gender: n.gender, age: n.age, occupation: n.occupation, status: n.status,
+        description: n.description, portrait: n.portrait, locationId: lid.has(n.locationId) ? n.locationId : null,
+        parents: n.parents.filter(x => kid.has(x)), spouses: n.spouses.filter(x => kid.has(x)), siblings: n.siblings.filter(x => kid.has(x)),
+        bonds: n.bonds.filter(b => kid.has(b.id) && !SECRET_BONDS.includes(b.type)).map(b => ({ id: b.id, type: b.type })),
+        factions: n.factions.filter(f => fid.has(f.id)).map(f => ({ id: f.id, rank: f.rank })),
+      })),
+      locations, factions,
+      market: { seed: m.seed, daysAdvanced: m.daysAdvanced, events: m.events, customItems: m.customItems, cityId: lid.has(m.cityId) ? m.cityId : null },
+    };
+  }
+  window.World.buildPlayerData = buildPlayerData;
+
+  // A newer world arrived from the cloud (e.g. you edited on your phone)
+  function applyRemote(data) {
+    if (!data || !Array.isArray(data.npcs)) return;
+    if (data.market && Array.isArray(data.market.events)) {
+      try { localStorage.setItem('dnd-market-v1', JSON.stringify(data.market)); } catch (e) { /* ignore */ }
+      window.Market.reload();
+    }
+    const d = { ...data }; delete d.market;
+    state = normalize(d); saveLocal();
+    if (!ui.editing) route();
   }
 
   route();
+  window.Market.onChange = () => { if (window.Cloud) window.Cloud.changed(); };
+  if (window.Cloud) {
+    window.Cloud.onStatus(renderSync);
+    window.Cloud.init({ getPayload: () => ({ data: { ...state, market: window.Market._state() }, player: buildPlayerData() }), applyRemote })
+      .catch(e => renderSync('error', e.message));
+  }
 })();

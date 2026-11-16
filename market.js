@@ -111,14 +111,25 @@
   function loadM() {
     try {
       const s = JSON.parse(localStorage.getItem(MKEY));
-      if (s && Array.isArray(s.events)) {
-        s.customItems = (Array.isArray(s.customItems) ? s.customItems : []).filter(i => i && i.id && i.base > 0 && i.war > 0);
-        return s;
-      }
+      if (s && Array.isArray(s.events)) return sanitize(s);
     } catch (e) { /* ignore */ }
     return defaultMState();
   }
-  function saveM() { try { localStorage.setItem(MKEY, JSON.stringify(ms)); } catch (e) { /* ignore */ } }
+  let readOnly = false; // player view: nobody can change the market
+  function saveM() {
+    if (readOnly) return;
+    try { localStorage.setItem(MKEY, JSON.stringify(ms)); } catch (e) { /* ignore */ }
+    if (window.Market && window.Market.onChange) window.Market.onChange();
+  }
+  function sanitize(s) {
+    if (!s || !Array.isArray(s.events)) return defaultMState();
+    return {
+      seed: Number(s.seed) || 1337, daysAdvanced: Math.max(0, Math.min(5000, Number(s.daysAdvanced) || 0)),
+      events: s.events.filter(e => e && Number.isFinite(e.day) && Number.isFinite(e.level)),
+      customItems: (Array.isArray(s.customItems) ? s.customItems : []).filter(i => i && i.id && i.base > 0 && i.war > 0),
+      cityId: s.cityId || null,
+    };
+  }
   ms = loadM();
 
   const totalDays = () => HISTORY_DAYS + ms.daysAdvanced;
@@ -341,12 +352,12 @@
             ${(window.World ? window.World.locations() : []).slice().sort((a, b) => a.name.localeCompare(b.name))
               .map(l => `<option value="${esc(l.id)}" ${l.id === ms.cityId ? 'selected' : ''}>📍 ${esc(l.name)}</option>`).join('')}
           </select>
-          <select id="warLevel" title="Change the war status from today onward" style="width:auto">
+          ${readOnly ? '' : `<select id="warLevel" title="Change the war status from today onward" style="width:auto">
             ${WAR_LEVELS.map(l => `<option value="${l.v}">${l.label}</option>`).join('')}
           </select>
           <button class="btn small" id="setWar">Set war status</button>
+          <button class="btn small primary" id="endDay" title="Close the market and move the world one day forward">🌙 End the day</button>`}
           <button class="btn small" id="liveBtn">${liveOn ? '⏸ Pause live' : '▶ Go live'}</button>
-          <button class="btn small primary" id="endDay" title="Close the market and move the world one day forward">🌙 End the day</button>
         </div>
       </div>
 
@@ -364,7 +375,7 @@
           <ul class="news">${headlines().map(h => `<li>${h}</li>`).join('')}</ul>
           <p class="small muted" style="margin-top:12px">Prices are in gold (gp), silver (sp) and copper (cp).
           ▲ red = more expensive, ▼ green = cheaper. Hover the big chart to see the price on any day.</p>
-          <hr style="border-color:var(--line);margin:16px 0">
+          ${readOnly ? '' : `<hr style="border-color:var(--line);margin:16px 0">
           <h3>✨ Add your own item</h3>
           <form id="itemForm" class="stack" autocomplete="off">
             <div><label>Name *</label><input name="name" required maxlength="50" placeholder="e.g. Dragon scale"></div>
@@ -378,9 +389,16 @@
             <div><label>What does the war do to it?</label><select name="war">${WAR_CHOICES.map(([v, l]) => `<option value="${v}" ${v === 1.3 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
             <div><label>How jumpy is the price?</label><select name="vol">${VOL_CHOICES.map(([v, l]) => `<option value="${v}" ${v === 0.016 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
             <button class="btn primary" type="submit">+ Add to market</button>
-          </form>
+          </form>`}
         </aside>
       </div>`;
+    root.querySelector('#citySel').onchange = e => {
+      ms.cityId = e.target.value || null; saveM(); for (const k in live) live[k] = 0; render(root);
+    };
+    root.querySelector('#liveBtn').onclick = () => { liveOn = !liveOn; startLive(); render(root); };
+    root.querySelectorAll('#catChips [data-cat]').forEach(b => b.onclick = () => { cat = b.dataset.cat; render(root); });
+    if (readOnly) { renderChartPanel(); renderGrid(); startLive(); return; }
+
     const sel = root.querySelector('#warLevel');
     const curLevel = (ms.events[ms.events.length - 1] || { level: 0 }).level;
     sel.value = String(curLevel);
@@ -392,9 +410,6 @@
       if (prev !== v) ms.events.push({ day: today(), level: v });
       saveM(); render(root);
       window.toast && window.toast('War status updated — prices will react over the coming days.');
-    };
-    root.querySelector('#citySel').onchange = e => {
-      ms.cityId = e.target.value || null; saveM(); for (const k in live) live[k] = 0; render(root);
     };
     root.querySelector('#itemForm').onsubmit = e => {
       e.preventDefault();
@@ -409,12 +424,10 @@
       ms.customItems.push(it); selected = it.id; cat = 'All'; saveM(); render(root);
       window.toast && window.toast(`✨ ${name} is now sold at the market!`);
     };
-    root.querySelector('#liveBtn').onclick = () => { liveOn = !liveOn; startLive(); render(root); };
     root.querySelector('#endDay').onclick = () => {
       ms.daysAdvanced++; for (const k in live) live[k] = 0; saveM(); render(root);
       window.toast && window.toast('🌙 A new day dawns. The market has moved.');
     };
-    root.querySelectorAll('#catChips [data-cat]').forEach(b => b.onclick = () => { cat = b.dataset.cat; render(root); });
     renderChartPanel(); renderGrid(); startLive();
   }
 
@@ -470,7 +483,7 @@
     const items = allItems().filter(i => cat === 'All' || i.cat === cat);
     grid.innerHTML = items.map(it => `
       <div class="mcard ${it.id === selected ? 'sel' : ''}" data-id="${it.id}">
-        <div class="nm">${esc(it.name)}${it.custom ? ` <button class="btn-x" title="Delete your item" data-delitem="${it.id}">🗑</button>` : ''}</div>
+        <div class="nm">${esc(it.name)}${it.custom && !readOnly ? ` <button class="btn-x" title="Delete your item" data-delitem="${it.id}">🗑</button>` : ''}</div>
         <div class="unit">${esc(it.unit)} · ${esc(it.cat)}${it.custom ? ' · ✨ yours' : ''}</div>
         <div class="pr" data-price="${it.id}">${formatCoins(livePrice(it.id))}</div>
         <div class="small" data-chg="${it.id}"></div>
@@ -528,8 +541,10 @@
   function stop() { clearInterval(timer); root = null; }
   function reset() { const keep = { customItems: ms.customItems, cityId: ms.cityId }; ms = { ...defaultMState(), ...keep }; saveM(); for (const k in live) live[k] = 0; }
   function setCity(id) { ms.cityId = id || null; saveM(); }
+  function reload() { ms = loadM(); for (const k in live) live[k] = 0; cache = null; }
+  function useState(s, opts = {}) { ms = sanitize(s); readOnly = !!opts.readOnly; for (const k in live) live[k] = 0; cache = null; }
 
   window.addEventListener('resize', () => { if (root && root.querySelector('#mgrid')) { drawBig(); renderGrid(); } });
 
-  window.Market = { render, stop, reset, setCity, formatCoins, items: allItems, _state: () => ms };
+  window.Market = { render, stop, reset, setCity, reload, useState, formatCoins, items: allItems, _state: () => ms };
 })();
