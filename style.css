@@ -246,3 +246,14 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold-dim); 
 @media print { body.printing #printArea .statblock { box-shadow: none; max-width: 640px; } body.printing #printArea { display: block !important; } }
 .mtable tr.msel td { background: #e0b35422; }
 .mname { color: var(--text); text-decoration: none; } .mname:hover { color: var(--gold); text-decoration: underline; }
+
+/* ---------- Login & players ---------- */
+body.locked .tabs, body.locked .sync { display: none !important; }
+.login-card { max-width: 420px; margin: 8vh auto; }
+.open-warn { background: #4a2a12; color: #ffd9a8; border-bottom: 1px solid #7a4a1d; padding: 6px 16px; font-size: .85rem; text-align: center; }
+.inbox-item { margin-bottom: 10px; } .inbox-item.new { border-color: var(--gold-dim); }
+.app-error { position: sticky; top: 0; z-index: 100; background: #7a1f12; color: #fff; padding: 10px 16px; font-size: .9rem; }
+.ver { font: 500 .7rem system-ui, sans-serif; color: var(--muted); vertical-align: middle; }
+.pnotes { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.pnote { background: #1f1a14; border-left: 3px solid var(--gold-dim); border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+.player-made { border-style: dashed; }

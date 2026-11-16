@@ -1,102 +1,73 @@
-# ☁️ Phase 3 setup: switching on the cloud, login, player view and AI
+# ☁️ Setup: cloud, logins, players (and the optional AI)
 
-**Time:** about 20–30 minutes. **Cost:** the cloud is free. The AI costs a few cents per NPC, and only if you switch it on.
+**Time:** about 30 minutes. **Cost:** free (the AI is optional and costs a few cents per NPC).
 
-🍽️ **Restaurant version:** your app is the dining room. Now we build the **kitchen in the back** (Supabase) where the food (your world) is stored, put a **lock on the kitchen door** (login), and hire an **AI chef** (Claude).
-
-You only do steps 1–5 once. Step 6 (AI) is optional.
+🍽️ **Restaurant version:** your app is the dining room. Supabase is the **kitchen** where your world is stored. Logins are the **lock on the door**: only you (the admin) can see and change the world. Your players get their own small room where they can add NPCs they meet and look at the maps.
 
 ---
 
-## Step 0: Put the website online (if you haven't yet)
-1. Merge the branch `claude/gifted-meitner-dfv5pp` into `main` on GitHub (open a Pull Request, press **Merge**).
-2. In your repo: **Settings → Pages**. Pick branch **main**, folder **/ (root)**, then **Save**.
-3. After a minute you get a link like `https://YOUR-NAME.github.io/DND/`. Write it down. This is **your app link**.
+## Step 1: Connect the app to your Supabase project
+1. In Supabase, open your project → **Project Settings → API** (or **Connect / API Keys**).
+2. Copy the **Project URL** (`https://xxxx.supabase.co`) and the **anon / public** key (`eyJ…` or `sb_publishable_…`).
+3. Either **send both to Claude**, or put them in `config.js` yourself (GitHub → `config.js` → ✏️ → paste → **Commit changes**).
 
-## Step 1: Make a free Supabase account (the kitchen)
-1. Go to **supabase.com** and sign up (you can use your GitHub account).
-2. Click **New project**. Name it `world-keeper`. Make up a database password and **save it somewhere safe**. Pick the region closest to you.
-3. Wait about 2 minutes while it's built.
+> ✅ These two are *meant* to be public, like a restaurant's street address.
+> ❌ Never share the **service_role / secret** key or any passwords in chat or on GitHub.
 
-## Step 2: Copy the two "address" values
-1. In your Supabase project, open **Project Settings → API** (you may also find it under **Connect** or **API Keys**).
-2. Copy the **Project URL**. It looks like `https://abcdefgh.supabase.co`.
-3. Copy the **anon / public** key. It's a long text starting with `eyJ`, or a key starting with `sb_publishable_`.
-4. On GitHub, open the file **`config.js`**, click the ✏️ pencil, and paste them between the quotes:
-   ```js
-   supabaseUrl: 'https://abcdefgh.supabase.co',
-   supabaseAnonKey: 'eyJ.....',
-   ```
-5. Click **Commit changes**.
+## Step 2: Build the kitchen (database)
+1. Supabase → **SQL Editor → New query**.
+2. Copy **everything** from `supabase/schema.sql`, paste it, and press **Run**. It should say "Success".
+   (It is safe to run again after every update.)
 
-> ✅ These two values are *meant* to be public, like a restaurant's street address. The lock is in step 3.
-> ❌ Never paste the **service_role** / **secret** key or your **Claude API key** into `config.js`!
+## Step 3: Lock the front door
+1. Supabase → **Authentication → Sign In / Providers** → switch **off** "Allow new users to sign up". Only you create accounts.
+2. Supabase → **Authentication → URL Configuration** → set **Site URL** to your website, e.g. `https://eastroils-prog.github.io/DND/`.
 
-## Step 3: Build the kitchen shelves + lock (the database)
-1. In Supabase, open **SQL Editor → New query**.
-2. Open the file **`supabase/schema.sql`** from this repo, copy **everything**, paste it in, and press **Run**.
-3. It should say "Success". This makes the table for your world plus the "bouncer" rules: only you can read or change your world, and players can only see the safe copy.
+## Step 4: Make your admin account
+1. Supabase → **Authentication → Users → Add user → Create new user**.
+2. Email: **`admin@frindeval.app`** (it doesn't have to be a real email) · Password: the admin password Claude gave you (or your own).
+3. Tick **Auto Confirm User** and press **Create user**.
+4. On the website, log in with username **`admin`** and that password.
 
-## Step 4: Tell Supabase where your app lives
-1. In Supabase, open **Authentication → URL Configuration**.
-2. Set **Site URL** to **your app link** from step 0, e.g. `https://YOUR-NAME.github.io/DND/`.
-3. Under **Redirect URLs**, add the same link and press **Save**. Now the "confirm your email" link sends you back to your app.
+## Step 5: Install the "player helper" (lets you make player accounts in the app)
+1. Supabase → **Edge Functions → Deploy a new function → Via Editor**.
+2. Name it exactly **`manage-players`**.
+3. Delete the example code, paste **everything** from `supabase/functions/manage-players/index.ts`, and press **Deploy**. Leave "Verify JWT" **on**.
 
-## Step 5: Create your account and lock the door
-1. Open **your app link** → **☁️ Cloud & Backup** tab.
-2. Type your email and a password (8+ characters) and press **Create account**.
-3. Check your email, click the confirmation link, then press **Log in**.
-4. You'll be asked whether to use the cloud world or this browser's world. Pick **Cancel** the first time, so this browser's world gets uploaded.
-5. **Lock the door:** in Supabase open **Authentication → Sign In / Providers** (or **Settings**) and switch **off** "Allow new users to sign up". Now nobody else can make an account.
+## Step 6: Make the player accounts
+1. On the website: **☁️ Cloud & Backup → 👥 Players**.
+2. Add each player: name, username, password (🎲 makes a random one):
 
-🎉 Now open your app link on your phone, log in with the same email and password, and your world is there too.
-
-**Player view:** in the ☁️ tab, press **📋 Copy** next to the player link and send it to your players.
-- They see only NPCs you've marked **👁 Players have met**, places that aren't secret, public factions and the market.
-- They never see secrets.
-- If the link leaks, press **Make a new link**.
-
----
-
-## Step 6 (optional): Hire the AI chef 🤖
-The AI needs a Claude API key. It lives **only in the kitchen** (Supabase), never on your website, so nobody can steal it.
-
-1. **Get a key:**
-   - Go to **console.anthropic.com**, sign up, and add a little credit under **Billing** (for example $5).
-   - Open **API Keys → Create Key** and copy it. It starts with `sk-ant-`.
-2. **Create the AI function:**
-   - In Supabase, open **Edge Functions** and choose to deploy a new function **via the editor**.
-   - Name it exactly **`generate-npc`**.
-   - Delete the example code and paste in **everything** from the file `supabase/functions/generate-npc/index.ts`.
-   - Press **Deploy**.
-   - Leave "Verify JWT" (log-in check) **on**.
-3. **Add the secrets:** in **Edge Functions → Secrets** (or **Project Settings → Edge Functions**), add two:
-
-   | Name | Value |
+   | Name | Username |
    |---|---|
-   | `ANTHROPIC_API_KEY` | your `sk-ant-...` key |
-   | `ALLOWED_EMAILS` | your email (for more people, separate with commas: `me@mail.com,friend@mail.com`) |
+   | Gustavs | `gustavs` |
+   | Marsels | `marsels` |
+   | Oskars | `oskars` |
 
-4. **Try it:**
-   - In the app, go to **🧙 NPCs** and press **🤖 AI NPC**.
-   - Type something like "a nervous tavern keeper hiding an enemy soldier in the cellar", then press **Create NPC**.
-   - Check the NPC (and their family), change anything you like, and press **Save**.
+3. Send each player their **username + password** privately, and the link: `https://eastroils-prog.github.io/DND/player.html`.
 
-💰 Each AI NPC costs roughly a few US cents. You can set a monthly spending limit in console.anthropic.com → **Limits**.
+**What players can do:** see the NPCs you mark **👁 Players have met**, **add NPCs they meet**, and **look at the maps**. That's all.
+- If a player adds someone who looks like a known NPC (similar name, same job…), it is **linked automatically** and shows as a 📝 note on that NPC's card. They can press "✂️ Not the same person" if it's wrong.
+- You see every player addition in **🧙 NPCs → 📝 From players**, with suggestions (including your secret NPCs, which players never see). Link it, or press **➕ Add as new NPC**.
+- Maps show **no pins and no place names** from the app. Your map pictures have names painted in — in **🗺 Maps**, use **🎭 Add player version (no names)** to upload a version without labels (Inkarnate can export without text). Players then see that one.
 
-> No AI? The **🎲 Random NPC** button always works for free, even offline.
+## Step 7 (optional): the AI helper 🤖
+1. Get a Claude API key at **console.anthropic.com** (add a little credit, e.g. $5; set a monthly limit under **Limits**).
+2. Supabase → Edge Functions → new function named **`generate-npc`** → paste `supabase/functions/generate-npc/index.ts` → Deploy.
+3. Supabase → **Edge Functions → Secrets**: add `ANTHROPIC_API_KEY` = your `sk-ant-…` key and `ALLOWED_EMAILS` = `admin@frindeval.app`.
 
 ---
+
+## ⚠️ Good to know: what the login does and doesn't protect
+- ✅ Your **saved world** (every NPC, secret and change you make) lives in the database and can only be read by the admin login. Players only ever receive the player-safe copy.
+- ⚠️ The **website files** on GitHub are public, including `world-data.js` — the *starting* version of Frindeval with its original secrets. A curious player who opens that file directly could read those starting secrets. If that matters to you, ask Claude to move the starting world out of the public files.
 
 ## If something goes wrong
 | You see… | Do this |
 |---|---|
-| ☁️ tab says "not switched on yet" | `config.js` is still empty or has a typo (step 2). Wait 1–2 minutes after committing; GitHub Pages needs time to update. |
-| "The database table is missing" | Run `supabase/schema.sql` again (step 3). |
-| "Please click the link in the email" | Confirm your email first (step 5), and check your spam folder. |
-| "Your email is not on the AI guest list" | Add your email to `ALLOWED_EMAILS` (step 6.3). |
-| "The AI helper is not installed yet" | The function must be named exactly `generate-npc` (step 6.2). |
-| "The Claude API key is wrong" | Re-copy the key into `ANTHROPIC_API_KEY` (step 6.3). |
-| ⚠️ Not synced / offline | Your changes are safe on this device and upload automatically when you're back online. |
-
-**Two devices at once:** if you edit on your phone *and* laptop at the exact same time, the last one saved wins. Edit on one device at a time.
+| A red bar "Something went wrong" | Copy the text and send it to Claude. |
+| The site looks old after an update | Press **Ctrl + Shift + R**. The version number (e.g. **v7**) next to the title shows which version you have. |
+| "Wrong username or password" | Check spelling; usernames are lowercase. The admin can set a new password with 🔑. |
+| "The player helper is not installed yet" | Do step 5 (the name must be exactly `manage-players`). |
+| "The database table is missing" | Do step 2 again. |
+| The yellow bar "Login is switched off" | `config.js` is still empty (step 1). |
