@@ -648,13 +648,35 @@
 
   // ================= MAGIC ITEMS =================
   const RAR_CLASS = { common: 'r-common', uncommon: 'r-uncommon', rare: 'r-rare', 'very rare': 'r-veryrare', legendary: 'r-legendary', artifact: 'r-artifact' };
-  function magicMult(item) {
-    const c = currentCity();
-    let m = c ? (Number(c.priceMod) || 1) : 1;
-    // the war makes weapons, armour and healing magic more expensive — most of all near the front
-    if (item.type === 'Weapon' || item.type === 'Armor' || /Healing/.test(item.name)) m *= 1 + 0.5 * Math.min(1.5, levelAt(today())) * (c ? Number(c.warExposure) || 1 : 1);
-    return m;
+  // ---- magic prices move every day, like the trade goods ----
+  // Each item gets 2 years of daily history: random ups and downs, slow inflation,
+  // and the war pushing up weapons, armour and healing magic (most of all near the front).
+  const magicCache = {};
+  const isWarMagic = it => it.type === 'Weapon' || it.type === 'Armor' || /Healing|Heroism|Resistance|Speed|Protection|Invulnerab|Fire|Lightning/.test(it.name);
+  function magicHistory(it) {
+    const n = totalDays(), key = it.name + '|' + n + '|' + ms.seed + '|' + JSON.stringify(ms.events);
+    if (magicCache[it.name] && magicCache[it.name].key === key) return magicCache[it.name];
+    const r = mulberry32(hashStr('magic:' + it.name) ^ ms.seed);
+    const vol = { common: 0.012, uncommon: 0.016, rare: 0.02, 'very rare': 0.025, legendary: 0.03 }[it.rarity] || 0.02;
+    const war = /Healing/.test(it.name) ? 2.2 : isWarMagic(it) ? 1.7 : it.type === 'Scroll' ? 1.25 : 1.1;
+    const x = new Array(n), e = new Array(n);
+    let xv = 0, ev = 0;
+    for (let d = 0; d < n; d++) {
+      const lv = levelAt(d);
+      ev += (Math.log(war) * lv - ev) / 6;
+      const target = 0.02 * d / 365 + ev;
+      xv += 0.06 * (target - xv) + vol * (1 + lv) * gauss(r);
+      x[d] = xv; e[d] = ev;
+    }
+    return (magicCache[it.name] = { key, x, e });
   }
+  function magicPriceAt(it, d) {
+    const h = magicHistory(it), c = currentCity();
+    const pm = c ? (Number(c.priceMod) || 1) : 1, expo = c ? (Number(c.warExposure) || 1) : 1;
+    return it.price * pm * Math.exp(h.x[d] + h.e[d] * (expo - 1));
+  }
+  const magicMult = it => magicPriceAt(it, today()) / it.price;
+  let magicSel = null, magicHover = null, magicLayout = null;
   const gp = v => `${Math.round(v).toLocaleString()} gp`;
   const regionOk = (item, city) => item.source !== 'Frindeval' || (city && city.region === item.region);
   function shopToday(city) {
@@ -685,14 +707,29 @@
     const list = M.ITEMS.filter(i => (!q || i.name.toLowerCase().includes(q) || (i.region || '').toLowerCase().includes(q))
       && (!mq.rarity || i.rarity === mq.rarity) && (!mq.source || i.source === mq.source))
       .sort((a, b) => M.RARITY_ORDER.indexOf(a.rarity) - M.RARITY_ORDER.indexOf(b.rarity) || a.name.localeCompare(b.name));
-    const row = it => `<tr>
-        <td><b>${esc(it.name)}</b>${it.text ? `<div class="small muted">${esc(it.text)}</div>` : ''}</td>
+    const t = today(), fw = firstWarDay();
+    const chg = it => { const now = magicPriceAt(it, t); return `${pctHtml(pct(now, magicPriceAt(it, t - 1)))}<br><span class="small">${pctHtml(pct(now, magicPriceAt(it, fw !== null ? Math.max(0, fw - 1) : t - 14)))} war</span>`; };
+    const row = it => `<tr class="${magicSel === it.name ? 'msel' : ''}">
+        <td><a href="#" class="mname" data-mitem="${esc(it.name)}"><b>${esc(it.name)}</b></a>${it.text ? `<div class="small muted">${esc(it.text)}</div>` : ''}</td>
         <td><span class="rar ${RAR_CLASS[it.rarity]}">${esc(it.rarity)}</span></td>
         <td>${esc(it.type)}${it.attune ? ' <span title="Requires attunement">(A)</span>' : ''}</td>
         <td>${esc(it.source)}</td>
         <td class="num">${it.rarity === 'legendary' ? `<span class="muted">~${gp(it.price * magicMult(it))}</span>` : gp(it.price * magicMult(it))}</td>
+        <td class="num small">${chg(it)}</td>
         <td class="small">${esc(it.source === 'Frindeval' ? 'Only in: ' + it.region : M.WHERE[it.rarity])}</td></tr>`;
     box.innerHTML = `
+      ${(() => { const it = M.ITEMS.find(i => i.name === magicSel); if (!it) return '';
+        const now = magicPriceAt(it, t), lo = Math.min(...Array.from({ length: Math.min(730, t + 1) }, (_, k) => magicPriceAt(it, t - k)));
+        const hi = Math.max(...Array.from({ length: Math.min(730, t + 1) }, (_, k) => magicPriceAt(it, t - k)));
+        return `<div class="panel chart-panel"><div class="chart-head"><div>
+          <h2 style="margin:0">${esc(it.name)} <span class="rar ${RAR_CLASS[it.rarity]}">${esc(it.rarity)}</span></h2>
+          <div class="big-price">${gp(now)}</div>
+          <div class="small">${pctHtml(pct(now, magicPriceAt(it, t - 1)))} today · ${pctHtml(pct(now, magicPriceAt(it, fw !== null ? Math.max(0, fw - 1) : t - 14)))} since the war began${city ? ' · prices in ' + esc(city.name) : ''}</div></div>
+          <button class="btn small" id="mChartClose">✕ Close chart</button></div>
+          <canvas class="chart-canvas" id="magicChart"></canvas>
+          <div class="stats"><div class="stat"><div class="k">Book price</div><div class="v">${gp(it.price)}</div></div>
+            <div class="stat"><div class="k">2-year low</div><div class="v">${gp(lo)}</div></div><div class="stat"><div class="k">2-year high</div><div class="v">${gp(hi)}</div></div>
+            <div class="stat"><div class="k">War effect</div><div class="v">${isWarMagic(it) ? (/Healing/.test(it.name) ? 'Very strong' : 'Strong') : 'Small'}</div></div></div></div>`; })()}
       <div class="split market-split">
         <div class="stack">
           <div class="panel">
@@ -701,7 +738,7 @@
               : !shop ? '<p class="muted">Nobody sells anything here… it\'s a dungeon.</p>'
               : `<p class="small">🎲 d100 rolled <b>${shop.roll}</b> ${shop.mod >= 0 ? '+' : '−'} ${Math.abs(shop.mod)} (${esc(city.type || 'place')}${M.SPECIAL_MOD[city.name] ? ', ' + esc(city.name) : ''}) = <b>${shop.total}</b> → ${esc(shop.row.text)}
                  ${readOnly ? '' : '<button class="btn small" id="reroll" style="margin-left:6px">🎲 Reroll</button>'}</p>
-                 ${shop.items.length ? `<div class="mtable-wrap"><table class="mtable"><thead><tr><th>Item</th><th>Rarity</th><th>Type</th><th>Book</th><th>Price here</th><th></th></tr></thead>
+                 ${shop.items.length ? `<div class="mtable-wrap"><table class="mtable"><thead><tr><th>Item</th><th>Rarity</th><th>Type</th><th>Book</th><th>Price here</th><th>Change</th><th></th></tr></thead>
                    <tbody>${shop.items.map(row).join('')}</tbody></table></div>` : '<p class="muted">The shelves are empty today. Try again tomorrow (🌙 End the day).</p>'}
                  <p class="small muted">Stock changes every day. Prices include the local price level${levelAt(today()) > 0 ? ' and the war (weapons, armour and healing cost more near the front)' : ''}.</p>`}
           </div>
@@ -712,7 +749,7 @@
               <select id="mqRarity" style="flex:1 1 120px"><option value="">All rarities</option>${M.RARITY_ORDER.slice(0, 5).map(r => `<option ${mq.rarity === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
               <select id="mqSource" style="flex:1 1 150px"><option value="">All books</option>${[['DMG', "Dungeon Master's Guide"], ['XGE', "Xanathar's Guide"], ['TCE', "Tasha's Cauldron"], ['Frindeval', '✨ Frindeval items']].map(([v, l]) => `<option value="${v}" ${mq.source === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
             </div>
-            <div class="mtable-wrap"><table class="mtable"><thead><tr><th>Item</th><th>Rarity</th><th>Type</th><th>Book</th><th>Price${city ? ' here' : ''}</th><th>Where to find</th></tr></thead>
+            <div class="mtable-wrap"><table class="mtable"><thead><tr><th>Item</th><th>Rarity</th><th>Type</th><th>Book</th><th>Price${city ? ' here' : ''}</th><th>Change</th><th>Where to find</th></tr></thead>
               <tbody>${list.map(row).join('')}</tbody></table></div>
             <p class="small muted">(A) = needs attunement. Prices use Xanathar's ranges per rarity (consumables half price). Rules text is in your books.</p>
           </div>
@@ -737,6 +774,17 @@
           </div>`}
         </aside>
       </div>`;
+    box.querySelectorAll('[data-mitem]').forEach(a => a.onclick = e => { e.preventDefault(); magicSel = a.dataset.mitem; magicHover = null; renderMagic(); root.querySelector('#magicView').scrollIntoView({ behavior: 'smooth' }); });
+    const mc = box.querySelector('#mChartClose'); if (mc) mc.onclick = () => { magicSel = null; renderMagic(); };
+    const cv = box.querySelector('#magicChart');
+    if (cv) {
+      const it = M.ITEMS.find(i => i.name === magicSel), start = Math.max(0, t - 729);
+      const data = Array.from({ length: t - start + 1 }, (_, k) => magicPriceAt(it, start + k) * 100); // drawn in copper like the goods
+      const draw = () => { magicLayout = drawChart(cv, data, start, magicHover); };
+      cv.onmousemove = ev => { if (!magicLayout) return; const rc = cv.getBoundingClientRect(); const f = (ev.clientX - rc.left - magicLayout.pad.l) / (magicLayout.w - magicLayout.pad.l - magicLayout.pad.r); magicHover = Math.round(Math.max(0, Math.min(1, f)) * (magicLayout.n - 1)); draw(); };
+      cv.onmouseleave = () => { magicHover = null; draw(); };
+      draw();
+    }
     const rr = box.querySelector('#reroll');
     if (rr) rr.onclick = () => { ms.magicSalt = ms.magicSalt || {}; ms.magicSalt[city.id] = (ms.magicSalt[city.id] || 0) + 1; saveM(); renderMagic(); };
     const s1 = box.querySelector('#mqSearch');

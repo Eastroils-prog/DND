@@ -224,3 +224,25 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold-dim); 
 .mtable-wrap { overflow-x: auto; }
 #magicView .panel { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 800px) { .mtable { font-size: .82rem; } .mtable th:nth-child(6), .mtable td:nth-child(6) { display: none; } }
+
+/* ---------- Bestiary (Monster Manual style) ---------- */
+.bestiary-detail { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .bestiary-detail { grid-template-columns: minmax(0, 1fr); } }
+.statblock { background: #fdf1dc; color: #1a1a1a; padding: 14px 18px; font: 14px/1.45 "Noto Sans", "Segoe UI", system-ui, sans-serif;
+  border-top: 5px solid #e69a28; border-bottom: 5px solid #e69a28; box-shadow: 0 0 0 1px #d6b98a, 0 4px 18px rgba(0,0,0,.45);
+  background-image: radial-gradient(ellipse at top left, #fff8ea, #fdf1dc 60%, #f3e2c0); }
+.sb-name { font: 700 26px/1.1 "Libre Baskerville", Georgia, "Times New Roman", serif; color: #7a200d; font-variant: small-caps; letter-spacing: .5px; }
+.sb-meta { font-style: italic; margin-bottom: 4px; }
+.sb-rule { height: 4px; margin: 8px 0; background: linear-gradient(to right, #922610, #922610 85%, transparent); clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.sb-line { color: #7a200d; } .sb-line b { color: #7a200d; }
+.sb-cr { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.sb-abil { display: grid; grid-template-columns: repeat(6, 1fr); text-align: center; color: #7a200d; }
+.sb-sect { font: 400 20px "Libre Baskerville", Georgia, serif; color: #7a200d; font-variant: small-caps; border-bottom: 1px solid #7a200d; margin: 14px 0 6px; }
+.sb-p { margin: 6px 0; } .sb-leg { padding-left: 14px; }
+.sb-side h3 { margin-bottom: 4px; }
+.chip.enemy { text-decoration: none; padding-right: 10px; } .chip.enemy.boss { border-color: #c58aff; }
+.grid6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; } @media (max-width: 600px) { .grid6 { grid-template-columns: repeat(3, 1fr); } }
+.enemies-box { margin: 6px 0; } .enemies-box summary { cursor: pointer; color: var(--muted); }
+@media print { body.printing #printArea .statblock { box-shadow: none; max-width: 640px; } body.printing #printArea { display: block !important; } }
+.mtable tr.msel td { background: #e0b35422; }
+.mname { color: var(--text); text-decoration: none; } .mname:hover { color: var(--gold); text-decoration: underline; }

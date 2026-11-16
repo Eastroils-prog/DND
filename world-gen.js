@@ -41,7 +41,7 @@
       races: ['Human', 'Human', 'Human', 'Human', 'Human', 'Human', 'Half-Orc', 'Tiefling', 'Dragonborn', 'Halfling'],
       M: ['Amir', 'Basim', 'Dawud', 'Faris', 'Ghazi', 'Hakim', 'Idris', 'Jabir', 'Karim', 'Latif', 'Malik', 'Nabil', 'Omar', 'Qasim', 'Rashid', 'Saleh', 'Tariq', 'Wasim', 'Yahya', 'Zahir', 'Anwar', 'Hamza'],
       F: ['Aisha', 'Basma', 'Dalal', 'Farah', 'Ghada', 'Hala', 'Inaya', 'Jamila', 'Karima', 'Layla', 'Maysa', 'Nadia', 'Qadira', 'Rania', 'Salma', 'Tahira', 'Wafa', 'Yasmin', 'Zainab', 'Amal', 'Huda', 'Mariam'],
-      surnames: ['al-Hadi', 'al-Rimal', 'al-Nakhla', 'al-Bahri', 'al-Qasr', 'al-Sayf', 'al-Najm', 'al-Turab', 'al-Waha', 'al-Jamal', 'al-Fajr', 'al-Ramli'],
+      surnames: ['al-Hadi', 'al-Rimal', 'al-Nakhla', 'al-Bahri', 'al-Qasr', 'al-Sayf', 'al-Najm', 'al-Turab', 'al-Waha', 'al-Jamal', 'al-Fajr', 'al-Ramli', 'al-Qamar', 'al-Zahra', 'al-Badr', 'al-Hilal', 'al-Saqr', 'al-Ghazal', 'al-Rih', 'al-Tal', 'al-Khalil', 'al-Dahab', 'al-Murjan', 'al-Sahra'],
     },
     western: {
       races: ['Human', 'Human', 'Human', 'Human', 'Human', 'Halfling', 'Half-Elf', 'Gnome', 'Dwarf', 'Half-Orc', 'Tiefling'],
@@ -130,6 +130,113 @@
     }
     return Object.keys(dist).filter(k => k !== start).sort((a, b) => dist[a] - dist[b]);
   }
+
+  // =========================================================
+  // ANCESTORS: everyone gets parents and grandparents (2 generations).
+  // Nobles get their family line traced 5 generations back.
+  // =========================================================
+  const LIFESPAN = { Human: 80, 'Half-Elf': 180, Elf: 700, Dwarf: 350, Halfling: 150, Gnome: 450, 'Half-Orc': 70, Tiefling: 100, Dragonborn: 80, Aasimar: 160 };
+  const GAP = { Human: [18, 38], 'Half-Elf': [20, 60], Elf: [90, 250], Dwarf: [45, 100], Halfling: [20, 45], Gnome: [40, 120], 'Half-Orc': [15, 30], Tiefling: [18, 40], Dragonborn: [15, 30], Aasimar: [20, 50] };
+  const TITLES = /^(Jarl|Lord|Lady|Sultan|Sultana|Prince|Princess|Emir|Emira|Mayor|Captain|Thane|Archmagister|Speaker|Warden|Harbourmaster|Elder|Old Mother|Old|High Priestess|Grand Vizier|Seeress|Sister|Master|Headwoman)\s+/;
+  const DEATHS = {
+    norse: ['Died of a winter fever.', 'Lost at sea in a storm.', 'Killed by Dead Basin raiders.', 'Died old and grey by the fire.', 'Fell in a border skirmish.', 'Drowned in the Dead Basin.', 'Taken by wolves in a hard winter.', 'Died in childbirth.', 'Crushed by a falling tree.', 'Died of the red cough.'],
+    desert: ['Died of thirst in a sandstorm.', 'Taken by corsairs and never seen again.', 'Died old in the shade of the palms.', 'Stung by a dune scuttler.', 'Died of the summer fever.', 'Lost with a caravan in the deep desert.', 'Died peacefully after the pilgrimage.'],
+    elf: ['Faded peacefully after six centuries.', 'Died in the Holy War.', 'Sailed west and never returned.', 'Died guarding the library.'],
+    dwarf: ['Killed in a tunnel collapse.', 'Died at the anvil, hammer in hand.', 'Fell in a battle under the mountain.', 'Died of the black lung.'],
+    western: ['Died of plague.', 'Lost at sea.', 'Died old in bed.', 'Killed by bandits on the road.', 'Died of a fever.'],
+  };
+  const NOBLE_HOUSES = {
+    veyra: { title: m => m ? 'Jarl' : 'Jarlkona', occ: (m) => m ? 'Jarl of Clan Veyra' : 'Jarlkona of Clan Veyra', byname: true },
+    ulfgardr: { sur: 'Ulfgarðr', title: m => m ? 'Lord' : 'Lady', occ: () => 'Head of House Ulfgarðr' },
+    kaldgeirr: { sur: 'Kaldgeirr', title: m => m ? 'Lord' : 'Lady', occ: () => 'Head of House Kaldgeirr' },
+    falk: { sur: 'Falk', title: m => m ? 'Lord' : 'Lady', occ: () => 'Head of House Falk' },
+    sultanate: { title: m => m ? 'Sultan' : 'Sultana', occ: m => m ? 'Sultan of Tuvar' : 'Sultana of Tuvar' },
+  };
+  window.FRINDEVAL_ANCESTORS = function (W) {
+    const byKey = {}; W.npcs.forEach(n => { byKey[n.key] = n; });
+    const locByKey = {}; W.locations.forEach(l => { locByKey[l.key] = l; });
+    const nobleFac = new Set(W.factions.filter(f => f.type === 'Noble house').map(f => f.key));
+    const used = new Set(W.npcs.map(n => n.name));
+    const isNoble = n => (n.factions || []).some(([f]) => nobleFac.has(f));
+    const houseOf = n => { const f = (n.factions || []).find(([k]) => nobleFac.has(k)); return f ? f[0] : null; };
+    const cultureOf = n => CULTURE_BY_KEY[n.loc] || (locByKey[n.loc] && CULTURE_BY_REGION[locByKey[n.loc].region]) || 'western';
+    const added = [];
+    function split(name) { // "Lord Sten Ulfgarðr" -> { first: 'Sten', sur: 'Ulfgarðr' }
+      const core = String(name).replace(TITLES, '').replace(TITLES, '');
+      const parts = core.split(' ');
+      return { first: parts[0], sur: parts.slice(1).join(' ') };
+    }
+    function parentRaces(race, r) {
+      if (race === 'Half-Elf') return r() < 0.5 ? ['Human', 'Elf'] : ['Elf', 'Human'];
+      if (race === 'Aasimar') return ['Human', 'Human'];
+      if (race === 'Tiefling') return r() < 0.5 ? ['Tiefling', 'Human'] : ['Human', 'Tiefling'];
+      return [race, race];
+    }
+    function makeParents(child, gen, noble) {
+      const r = mulberry32(hash('ancestors:' + child.key));
+      const pick = a => a[Math.floor(r() * a.length)];
+      const cultKey = child.cult || cultureOf(child), C = CULTURES[cultKey];
+      const { sur } = split(child.name);
+      // people who married INTO a house (e.g. Sigrid) come from their own family, not the house line
+      const marriedIn = c => c.gender === 'Female' && c.spouse && byKey[c.spouse] && houseOf(byKey[c.spouse]) && houseOf(byKey[c.spouse]) === houseOf(c);
+      const house = child.house !== undefined && child.house !== null ? child.house : (noble && !child.ancestor && !marriedIn(child) ? houseOf(child) : null);
+      const H = house && NOBLE_HOUSES[house];
+      const NOBLE_JOBS = { norse: ['Landholder', 'Hersir (local chieftain)', 'Shipowner', 'Old court thane'], desert: ['Merchant prince', 'Emir', 'Vizier of the old court'], elf: ['Elder of Tavlar'], dwarf: ['Hall-lord'], western: ['Landed knight', 'Wealthy merchant'] };
+      // father's first name: Norse children carry it in their surname (Sigurdsson -> Sigurd)
+      let fatherFirst = null;
+      if (C.family && sur) fatherFirst = C.M.find(m => C.family(m, child.gender || 'Male') === sur) || null;
+      const [fr, mr] = parentRaces(child.race || 'Human', r);
+      const CF = fr === 'Elf' ? CULTURES.elf : fr === 'Dwarf' ? CULTURES.dwarf : C;
+      const CM = mr === 'Elf' ? CULTURES.elf : mr === 'Dwarf' ? CULTURES.dwarf : C;
+      const childAge = parseInt(child.age, 10) || 40;
+      const unique = make => { let nm = make(), t = 0; while (used.has(nm) && t++ < 25) nm = make(); if (used.has(nm)) { let i = 2; while (used.has(`${nm} ${['', '', 'II', 'III', 'IV', 'V', 'VI'][i] || i}`)) i++; nm = `${nm} ${['', '', 'II', 'III', 'IV', 'V', 'VI'][i] || i}`; } used.add(nm); return nm; };
+      const people = [['Male', fr, CF], ['Female', mr, CM]].map(([g, race, CC], idx) => {
+        const [g1, g2] = GAP[race] || GAP.Human;
+        const age = childAge + g1 + Math.floor(r() * (g2 - g1));
+        const life = (LIFESPAN[race] || 80) * (0.7 + r() * 0.35);
+        const dead = age > life || r() < 0.12 * gen;
+        const deathAge = dead ? Math.max(g1 + 5, Math.min(age, Math.round(life))) : age;
+        let first, last;
+        if (idx === 0) {
+          first = fatherFirst || pick(CC.M);
+          if (H && H.sur) last = H.sur;
+          else if (CC.family) last = CC === C && C.family ? C.family(pick(C.M), 'Male') : pick(CC.surnames || ['']);
+          else last = (CC === C && sur && !C.family) ? sur : pick(CC.surnames);
+          if (CC.family && H && H.byname) last = `the ${pick(['Grey', 'Bold', 'Wise', 'Stern', 'Old', 'Red', 'Strong', 'Silent', 'Fair', 'Iron-Willed'])}`;
+        } else {
+          first = pick(CC.F);
+          last = CC.family ? CC.family(pick(CC.M), 'Female') : pick(CC.surnames);
+        }
+        const title = H && idx === 0 ? H.title(true) + ' ' : H && idx === 1 ? H.title(false) + ' ' : '';
+        const name = unique(() => `${title}${idx === 0 && fatherFirst ? first : (idx === 0 ? pick(CC.M) : pick(CC.F))} ${last}`.trim());
+        const kind = KIND_BY_KEY[child.loc] || 'village';
+        const occ = H ? H.occ(idx === 0) : noble ? pick(NOBLE_JOBS[cultKey] || NOBLE_JOBS.western) : pick(JOBS[kind] || JOBS.village);
+        const deaths = DEATHS[cultKey] || DEATHS.western;
+        const desc = dead ? `${pick(deaths)}` : `${(() => { const l = pick(LOOKS); return l[0].toUpperCase() + l.slice(1); })()}. ${pick(MANNER)}`;
+        return {
+          key: `anc_${child.key}_${idx ? 'm' : 'f'}`, name, race, gender: g, age: String(dead ? deathAge : age), occupation: occ,
+          alignment: pick(ALIGN), status: dead ? 'Dead' : 'Alive', description: desc, notes: '',
+          loc: dead ? null : child.loc, generated: true, ancestor: true, cult: cultKey, house: idx === 0 && H ? house : null, factions: H && !dead ? [[house, idx === 0 ? 'Elder of the house' : 'Elder of the house']] : [],
+        };
+      });
+      people[1].spouse = people[0].key;
+      people.forEach(p => { W.npcs.push(p); byKey[p.key] = p; added.push(p); });
+      child.parents = [people[0].key, people[1].key];
+      return people;
+    }
+    // need: generations back on both sides · line: generations back along the family line (nobles: 5)
+    function ensure(n, need, line, gen) {
+      if (need <= 0 && line <= 0) return;
+      let parents = (n.parents || []).map(k => byKey[k]).filter(Boolean);
+      if (!parents.length) parents = makeParents(n, gen, line > 2);
+      const [father, mother] = parents;
+      if (father) ensure(father, need - 1, line - 1, gen + 1);
+      if (mother) ensure(mother, need - 1, 0, gen + 1);
+    }
+    const start = W.npcs.slice(); // only people who already exist start a tree
+    start.forEach(n => { if (n.loc && locByKey[n.loc] && locByKey[n.loc].type !== 'Dungeon') ensure(n, 2, isNoble(n) ? 5 : 0, 1); });
+    return added.length;
+  };
 
   // Adds villagers to W.npcs (and travel routes to W.movers) until every place has at least `perPlace` people.
   window.FRINDEVAL_GENERATE = function (W, perPlace = 10) {
