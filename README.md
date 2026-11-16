@@ -3,6 +3,8 @@
 A web app for Dungeon Masters:
 - 🧙 **NPCs**: add, edit, delete. Race, job, alignment, status, description, secret DM notes
 - 🏰 **Locations**: places in your world, and who lives where
+- 🔮 **Magic shop**: what each town sells today (d100), every DMG, Xanathar's and Tasha's item with prices, 30 Frindeval items, and the six Vestiges
+- 🐎 **Travellers**: traders and nobles move along the roads each time you press 🌙 End the day
 - 🗺 **Maps**: your maps of Frindeval with clickable pins. Click a town to see its NPCs, or add your own maps
 - 🌳 **Family trees**: link NPCs as parents, children, spouses and siblings, then see the tree
 - 💰 **Living market**: about 30 items (beer, bread, healing potions, weapons, inn stays by comfort level…)
@@ -31,6 +33,8 @@ After about a minute you'll get a link like `https://<your-name>.github.io/DND/`
 | `app.js` | The waiters: NPCs, locations, family tree, backup |
 | `market.js` | The market kitchen that cooks up prices, history and the war |
 | `world-data.js` | Your world, Frindeval: every place, house and starting NPC. The app loads this the first time |
+| `world-gen.js` | Makes the ordinary villagers so every place has at least 10 people |
+| `magic-items.js` | Magic items (DMG, Xanathar's, Tasha's), 30 Frindeval items, the six Vestiges and the d100 shop table |
 | `maps/` | Your map pictures |
 | `cloud.js` | The delivery van between your browser and the cloud kitchen (login + sync) |
 | `config.js` | The kitchen's street address (your Supabase URL + public key) |
