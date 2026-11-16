@@ -397,9 +397,13 @@
             <button class="btn small" id="aiNpc" title="Describe an NPC and let the AI write it">🤖 AI NPC</button>
           </div>
           ${gateState() === 'admin' ? `<button class="btn small" id="inboxBtn" style="width:100%;margin-top:8px">${inboxLabel()}</button>` : ''}
+          <div class="seg" role="tablist" style="margin-top:8px">
+            <button class="btn small ${ui.who !== 'shown' ? 'on' : ''}" data-seg="">👥 All</button>
+            <button class="btn small ${ui.who === 'shown' ? 'on' : ''}" data-seg="shown">👁 Shown to players (${state.npcs.filter(n => n.known && !n.ancestor).length})</button>
+          </div>
           <div class="stack" style="margin-top:12px">
             <input id="npcSearch" placeholder="🔍 Search name, job, race…" value="${esc(ui.search)}">
-            <select id="npcWho">${[['', '👥 Everyone (living world)'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now'], ['ancestors', '📜 Ancestors (family trees)'], ['all', '🗂 Absolutely everyone']]
+            <select id="npcWho">${[['', '👥 Everyone (living world)'], ['shown', '👁 Shown to players'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now'], ['ancestors', '📜 Ancestors (family trees)'], ['all', '🗂 Absolutely everyone']]
               .map(([v, l]) => `<option value="${v}" ${ui.who === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
             <select id="npcLoc"><option value="">📍 All locations</option><option value="__none" ${ui.locFilter === '__none' ? 'selected' : ''}>Unknown / wandering</option>
               ${[...state.locations].sort(byName).map(l => `<option value="${l.id}" ${ui.locFilter === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select>
@@ -413,7 +417,8 @@
     $('#aiNpc').onclick = () => { ui.npcId = null; ui.editing = false; ui.draft = null; renderNpcList(); renderAiPanel(); };
     $('#npcSearch').oninput = e => { ui.search = e.target.value; renderNpcList(); };
     $('#npcLoc').onchange = e => { ui.locFilter = e.target.value; renderNpcList(); };
-    $('#npcWho').onchange = e => { ui.who = e.target.value; renderNpcList(); };
+    $('#npcWho').onchange = e => { ui.who = e.target.value; renderNpcs($('#app')); };
+    document.querySelectorAll('[data-seg]').forEach(b => b.onclick = () => { ui.who = b.dataset.seg; renderNpcs($('#app')); });
     $('#npcBack').onclick = () => { ui.npcId = null; ui.editing = false; ui.draft = null; setDetail(false); renderNpcList(); window.scrollTo(0, 0); };
     const ib = $('#inboxBtn'); if (ib) ib.onclick = () => { ui.npcId = null; ui.editing = false; renderNpcList(); renderPlayerInbox(); loadPlayerNpcs().then(renderPlayerInbox); };
     renderNpcList(); renderNpcDetail();
@@ -424,11 +429,11 @@
     const list = state.npcs.filter(n =>
       (!q || [n.name, n.occupation, n.race].some(v => (v || '').toLowerCase().includes(q))) &&
       (!ui.locFilter || (ui.locFilter === '__none' ? !loc(n.locationId) : n.locationId === ui.locFilter)) &&
-      (ui.who === 'all' || (ui.who === 'ancestors' ? n.ancestor : !n.ancestor && (!ui.who || (ui.who === 'main' ? !n.generated : ui.who === 'villagers' ? n.generated : ui.who === 'travel' ? !!n.travel : !!(n.travel && n.travel.road)))))
+      (ui.who === 'all' || (ui.who === 'ancestors' ? n.ancestor : !n.ancestor && (!ui.who || (ui.who === 'shown' ? n.known : ui.who === 'main' ? !n.generated : ui.who === 'villagers' ? n.generated : ui.who === 'travel' ? !!n.travel : !!(n.travel && n.travel.road)))))
     ).sort(byName);
     $('#npcList').innerHTML = list.length ? list.map(n => `
       <li data-id="${n.id}" class="li-flex ${n.id === ui.npcId ? 'sel' : ''}">${avatar(n)}<div>
-        <div>${esc(n.name)} ${n.status !== 'Alive' ? `<span class="badge ${n.status === 'Dead' ? 'dead' : 'missing'}">${esc(n.status)}</span>` : ''}</div>
+        <div>${n.known ? '<span title="Shown to players">👁</span> ' : ''}${esc(n.name)} ${n.status !== 'Alive' ? `<span class="badge ${n.status === 'Dead' ? 'dead' : 'missing'}">${esc(n.status)}</span>` : ''}</div>
         <div class="sub">${esc([n.race, n.occupation].filter(Boolean).join(' · '))} ${n.travel && n.travel.road && loc(n.travel.road.to) ? '· 🐎 → ' + esc(loc(n.travel.road.to).name) : loc(n.locationId) ? '· 📍 ' + esc(loc(n.locationId).name) : ''}</div>
       </div></li>`).join('') : '<li class="muted" style="cursor:default">No NPCs found.</li>';
     document.querySelectorAll('#npcList li[data-id]').forEach(li => li.onclick = () => {
@@ -538,7 +543,7 @@
       </div>`;
     wireTravel(n);
     $('#printPlayer').onclick = () => printNpcs([n], false);
-    $('#toggleKnown').onclick = () => { n.known = !n.known; save(); toast(n.known ? '👁 Players can now see this NPC (no secrets).' : '🙈 Hidden from the player view.'); renderNpcDetail(); };
+    $('#toggleKnown').onclick = () => { n.known = !n.known; save(); toast(n.known ? '👁 Players can now see this NPC (no secrets).' : '🙈 Hidden from the player view.'); renderNpcs($('#app')); };
     $('#printDm').onclick = () => printNpcs([n], true);
     $('#portraitFile').onchange = async e => {
       try { n.portrait = await readPortrait(e.target.files[0]); save(); toast('📷 Picture added!'); renderNpcList(); renderNpcDetail(); }

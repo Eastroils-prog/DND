@@ -349,3 +349,6 @@ body.locked .tabs, body.locked .sync { display: none !important; }
 @media (max-width: 800px) { .war-banner select { max-width: none !important; width: 100% !important; } }
 .brand { display: inline-flex; align-items: center; gap: 8px; }
 .brand-ico { width: 28px; height: 28px; border-radius: 7px; }
+.seg { display: flex; gap: 4px; background: var(--field-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.seg .btn { flex: 1 1 0; border: none; background: transparent; }
+.seg .btn.on { background: var(--gold); color: var(--on-gold); }
