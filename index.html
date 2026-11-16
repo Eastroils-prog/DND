@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Keeper — NPCs & Market</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🐉 World Keeper</div>
+    <nav class="tabs" id="tabs">
+      <a href="#npcs" data-tab="npcs">🧙 NPCs</a>
+      <a href="#locations" data-tab="locations">🏰 Locations</a>
+      <a href="#factions" data-tab="factions">⚜️ Factions</a>
+      <a href="#tree" data-tab="tree">🌳 Family Tree</a>
+      <a href="#market" data-tab="market">💰 Market</a>
+      <a href="#cloud" data-tab="cloud">☁️ Cloud & Backup</a>
+    </nav>
+    <a href="#cloud" id="syncStatus" class="sync" hidden></a>
+  </header>
+  <main id="app"></main>
+  <div id="toast" class="toast" role="status"></div>
+
+  <!-- Supabase = the cloud database + login. If it can't load (offline), the app still works locally. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="cloud.js"></script>
+  <script src="market.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
