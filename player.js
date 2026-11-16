@@ -7,11 +7,12 @@
   const $ = (sel, el = document) => el.querySelector(sel);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const safeImg = s => (typeof s === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(s)) ? s : '';
+  const safeMapSrc = s => (typeof s === 'string' && /^maps\/[\w.-]+\.(jpg|jpeg|png|webp)$/.test(s)) ? s : safeImg(s);
   const safeColor = c => /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#c98a3d';
   const byName = (a, b) => String(a.name).localeCompare(String(b.name));
   const app = $('#app');
 
-  let world = { npcs: [], locations: [], factions: [] }, ui = { search: '', loc: '', npcId: null };
+  let world = { npcs: [], locations: [], factions: [], maps: [] }, ui = { search: '', loc: '', npcId: null, mapId: null, pinSel: null };
   window.World = { locations: () => world.locations, esc };
   window.toast = msg => { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); };
 
@@ -29,6 +30,7 @@
     world = {
       npcs: Array.isArray(data.npcs) ? data.npcs : [], locations: Array.isArray(data.locations) ? data.locations : [],
       factions: Array.isArray(data.factions) ? data.factions : [], updated_at: data.updated_at,
+      maps: (Array.isArray(data.maps) ? data.maps : []).map(m => ({ id: String(m.id), name: String(m.name || 'Map'), src: safeMapSrc(m.src), pins: m.pins || {} })).filter(m => m.src),
     };
     world.npcs.forEach(n => { n.portrait = safeImg(n.portrait); ['parents', 'spouses', 'siblings', 'bonds', 'factions'].forEach(k => { if (!Array.isArray(n[k])) n[k] = []; }); });
     world.factions.forEach(f => { f.color = safeColor(f.color); });
@@ -51,6 +53,7 @@
     if (tab !== 'market') window.Market.stop();
     if (tab === 'market') return window.Market.render(app);
     if (tab === 'places') return renderPlaces();
+    if (tab === 'maps') return renderMaps();
     renderPeople();
   }
   window.addEventListener('hashchange', route);
@@ -108,6 +111,28 @@
         <button class="btn small" data-prices="${esc(L.id)}">💰 Prices here</button></div>`;
     }).join('') || '<div class="empty">No places known yet.</div>'}</div>`;
     app.querySelectorAll('[data-prices]').forEach(b => b.onclick = () => { window.Market.setCity(b.dataset.prices); location.hash = 'market'; });
+  }
+
+  function renderMaps() {
+    if (!world.maps.find(m => m.id === ui.mapId)) ui.mapId = world.maps.length ? world.maps[0].id : null;
+    const m = world.maps.find(x => x.id === ui.mapId);
+    if (!m) { app.innerHTML = '<div class="panel empty">No maps shared yet.</div>'; return; }
+    const pins = Object.entries(m.pins).filter(([lid, xy]) => loc(lid) && Array.isArray(xy) && xy.length === 2 && xy.every(Number.isFinite));
+    const L = loc(ui.pinSel), people = L ? world.npcs.filter(n => n.locationId === L.id).sort(byName) : [];
+    app.innerHTML = `<div class="panel">
+      <div class="cat-chips">${world.maps.map(x => `<button class="btn small ${x.id === m.id ? 'on' : ''}" data-map="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>
+      <div class="map-scroll"><div class="map-inner">
+        <img src="${esc(m.src)}" alt="${esc(m.name)}" draggable="false">
+        ${pins.map(([lid, [x, y]]) => `<button class="pin ${ui.pinSel === lid ? 'sel' : ''}" data-pin="${esc(lid)}" style="left:${Number(x)}%;top:${Number(y)}%" title="${esc(loc(lid).name)}"></button>`).join('')}
+      </div></div>
+      ${L ? `<div class="field-view pin-card"><h3 style="margin:0">${esc(L.name)}</h3>
+        <div class="small muted">${esc(L.type || '')}${L.region ? ' · ' + esc(L.region) : ''}</div>
+        <ul class="members">${people.map(p => `<li>${avatar(p, 24)} ${esc(p.name)} <span class="muted small">${esc(p.occupation || '')}</span></li>`).join('') || '<li class="muted small">You haven\'t met anyone here yet.</li>'}</ul>
+        <button class="btn small" id="pinPrices">💰 Prices here</button></div>` : '<p class="small muted">Click a pin to see who you know there.</p>'}
+    </div>`;
+    app.querySelectorAll('[data-map]').forEach(b => b.onclick = () => { ui.mapId = b.dataset.map; ui.pinSel = null; renderMaps(); });
+    app.querySelectorAll('[data-pin]').forEach(b => b.onclick = () => { ui.pinSel = b.dataset.pin; renderMaps(); });
+    const pp = $('#pinPrices'); if (pp) pp.onclick = () => { window.Market.setCity(L.id); location.hash = 'market'; };
   }
 
   load(true);
