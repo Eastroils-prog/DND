@@ -8,6 +8,6 @@
    rules in supabase/schema.sql. NEVER put your Claude API key here!
    ========================================================= */
 window.WORLD_KEEPER_CONFIG = {
-  supabaseUrl: '',      // looks like: https://abcdefghijkl.supabase.co
-  supabaseAnonKey: '',  // a long text starting with: eyJ...  (or sb_publishable_...)
+  supabaseUrl: 'https://vzbsjvxtfgslucabtiia.supabase.co',
+  supabaseAnonKey: 'sb_publishable_dNjQ0-lEiWwgvQiqz3yPvQ_phL-PitI', // public key — safe to share
 };

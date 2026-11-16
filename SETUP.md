@@ -14,6 +14,12 @@
 > ✅ These two are *meant* to be public, like a restaurant's street address.
 > ❌ Never share the **service_role / secret** key or any passwords in chat or on GitHub.
 
+### Hosting on Vercel instead of GitHub Pages
+1. Go to **vercel.com** → sign in with GitHub → **Add New… → Project** → pick the **DND** repository → **Import**.
+2. Framework preset: **Other**. Leave the build command **empty** and the output directory as the **root** (`./`). Press **Deploy**.
+3. You get a link like `https://dnd-xxxx.vercel.app`. Every time you merge into `main`, Vercel updates the site by itself.
+4. Use **that** link wherever this guide says "your website" (Supabase **Site URL** in step 3, and the player link `…/player.html` in step 6).
+
 ## Step 2: Build the kitchen (database)
 1. Supabase → **SQL Editor → New query**.
 2. Copy **everything** from `supabase/schema.sql`, paste it, and press **Run**. It should say "Success".
