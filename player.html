@@ -4,27 +4,38 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>Player View — World Keeper</title>
-  <link rel="stylesheet" href="style.css">
+  <title>Player Page — World Keeper</title>
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
-<body>
+<body class="locked">
+  <!-- If anything breaks, show a red bar with the error so it can be sent to Claude -->
+  <script>
+    window.APP_VERSION = '7';
+    window.showAppError = function (msg) {
+      var b = document.getElementById('appError');
+      if (!b) { b = document.createElement('div'); b.id = 'appError'; b.className = 'app-error'; document.body.prepend(b); }
+      b.textContent = '⚠️ Something went wrong (version ' + window.APP_VERSION + '): ' + msg + ' — please send this message to Claude. Tip: press Ctrl + Shift + R to reload.';
+    };
+    window.addEventListener('error', function (e) { window.showAppError((e.message || 'error') + (e.filename ? ' in ' + e.filename.split('/').pop() + ':' + e.lineno : '')); });
+    window.addEventListener('unhandledrejection', function (e) { window.showAppError(String(e.reason && e.reason.message || e.reason)); });
+  </script>
+
   <header class="topbar">
-    <div class="brand">🎭 Player View</div>
+    <div class="brand">🎭 Frindeval <span class="ver">v7</span></div>
     <nav class="tabs" id="tabs">
-      <a href="#people" data-tab="people">🧙 People</a>
-      <a href="#places" data-tab="places">🏰 Places</a>
+      <a href="#people" data-tab="people">🧙 Known NPCs</a>
       <a href="#maps" data-tab="maps">🗺 Maps</a>
-      <a href="#market" data-tab="market">💰 Market</a>
     </nav>
-    <span id="updated" class="small muted"></span>
+    <span id="who" class="small muted" style="margin-left:auto"></span>
+    <button class="btn small" id="logoutBtn" hidden>🚪 Log out</button>
   </header>
-  <main id="app"><div class="panel empty">Loading the world…</div></main>
+  <main id="app"><div class="panel empty">Loading…</div></main>
   <div id="toast" class="toast" role="status"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
-  <script src="config.js"></script>
-  <script src="magic-items.js"></script>
-  <script src="market.js"></script>
-  <script src="player.js"></script>
+  <script src="config.js?v=7"></script>
+  <script src="cloud.js?v=7"></script>
+  <script src="similar.js?v=7"></script>
+  <script src="player.js?v=7"></script>
 </body>
 </html>

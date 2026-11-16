@@ -196,7 +196,7 @@
       for (const [lid, xy] of Object.entries(m.pins || {})) {
         if (Array.isArray(xy) && xy.length === 2 && xy.every(v => Number.isFinite(v) && v >= 0 && v <= 100)) pins[lid] = xy;
       }
-      return { id: String(m.id), name: String(m.name || 'Map'), src: safeMapSrc(m.src), hidden: m.hidden === true, pins };
+      return { id: String(m.id), name: String(m.name || 'Map'), src: safeMapSrc(m.src), playerSrc: m.playerSrc ? safeImg(m.playerSrc) : '', hidden: m.hidden === true, pins };
     });
     s.monsters = (Array.isArray(s.monsters) ? s.monsters : []).filter(m => m && m.id && m.name).map(m => ({ ...m, custom: true }));
     s.roads = (Array.isArray(s.roads) ? s.roads : []).filter(r => Array.isArray(r) && r.length === 3 && r[2] > 0);
@@ -210,15 +210,28 @@
     return s;
   }
   function load() {
-    try { const raw = localStorage.getItem(STORE_KEY); if (raw) return normalize(JSON.parse(raw)); } catch (e) { /* ignore */ }
-    return sampleWorld();
+    let raw = null;
+    try { raw = localStorage.getItem(STORE_KEY); } catch (e) { /* storage blocked */ }
+    if (!raw) return sampleWorld();
+    try { return normalize(JSON.parse(raw)); }
+    catch (e) {
+      // NEVER silently replace a saved world: keep the old one safe and tell the DM
+      try { localStorage.setItem(STORE_KEY + '-backup', raw); } catch (e2) { /* ignore */ }
+      window.showAppError && window.showAppError('Your saved world could not be upgraded (' + e.message + '). A backup was kept — download it from ☁️ Cloud & Backup and send the error to Claude.');
+      loadFailed = true;
+      return sampleWorld();
+    }
   }
+  let loadFailed = false;
   function saveLocal() {
+    if (loadFailed) return; // don't overwrite the world that failed to load
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { toast('⚠️ Could not save (browser storage full or blocked)'); }
   }
   // every change: save in this browser, then tell the cloud (if you're logged in it uploads a moment later)
-  function save() { saveLocal(); if (window.Cloud) window.Cloud.changed(); }
-  let state = load(); saveLocal();
+  function save() { if (loadFailed) return; saveLocal(); if (window.Cloud) window.Cloud.changed(); }
+  let state = load();
+  // with login switched on, nothing is stored in this browser until the admin has logged in
+  if (!(window.Cloud && window.Cloud.configured)) saveLocal();
   if (migratedToFrindeval) {
     migratedToFrindeval = false;
     if (window.Cloud) window.Cloud.changed(); // upload the new world next time you're logged in
@@ -355,6 +368,11 @@
   // ---------- routing (tabs) ----------
   const ui = { who: '', routeDraft: [], npcId: null, editing: false, search: '', locFilter: '', treeId: null, editLocId: null, editFacId: null, facId: null };
   function route() {
+    const g = gateState(); lastGate = g;
+    if (g === 'player') { location.replace('player.html'); return; }
+    document.body.classList.toggle('locked', g === 'login' || g === 'loading');
+    const warn = $('#openWarn'); if (warn) warn.hidden = g !== 'open';
+    if (g === 'login' || g === 'loading') { window.Market.stop(); renderLoginGate($('#app'), g); return; }
     const tab = (location.hash || '#npcs').slice(1).split('/')[0];
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab !== 'market') window.Market.stop();
@@ -378,6 +396,7 @@
             <button class="btn small" id="randNpc" title="Make up a random NPC instantly (no internet needed)">🎲 Random NPC</button>
             <button class="btn small" id="aiNpc" title="Describe an NPC and let the AI write it">🤖 AI NPC</button>
           </div>
+          ${gateState() === 'admin' ? `<button class="btn small" id="inboxBtn" style="width:100%;margin-top:8px">${inboxLabel()}</button>` : ''}
           <div class="stack" style="margin-top:12px">
             <input id="npcSearch" placeholder="🔍 Search name, job, race…" value="${esc(ui.search)}">
             <select id="npcWho">${[['', '👥 Everyone (living world)'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now'], ['ancestors', '📜 Ancestors (family trees)'], ['all', '🗂 Absolutely everyone']]
@@ -395,6 +414,7 @@
     $('#npcSearch').oninput = e => { ui.search = e.target.value; renderNpcList(); };
     $('#npcLoc').onchange = e => { ui.locFilter = e.target.value; renderNpcList(); };
     $('#npcWho').onchange = e => { ui.who = e.target.value; renderNpcList(); };
+    const ib = $('#inboxBtn'); if (ib) ib.onclick = () => { ui.npcId = null; ui.editing = false; renderNpcList(); renderPlayerInbox(); loadPlayerNpcs().then(renderPlayerInbox); };
     renderNpcList(); renderNpcDetail();
   }
 
@@ -507,6 +527,7 @@
             <button class="btn primary" id="joinFac" style="flex:0">+ Join</button>
           </div>` : '<p class="muted small">Make factions in the ⚜️ Factions tab.</p>'}
         </div>
+        ${playerNotesHtml(n)}
         <div>
           <h3>🧭 Travel</h3>
           ${travelHtml(n)}
@@ -1028,6 +1049,138 @@
     };
   }
 
+  // ================= LOGIN GATE =================
+  // With the cloud switched on, nothing is shown until the admin (DM) logs in.
+  // Players are sent to their own page (player.html).
+  function gateState() {
+    const C = window.Cloud;
+    if (!C || !C.configured) return 'open';
+    if (C.status === 'loading') return 'loading';
+    if (!C.user) return 'login';
+    if (C.role === 'player') return 'player';
+    if (C.role !== 'admin') return 'loading';
+    return 'admin';
+  }
+  let lastGate = null;
+  function renderLoginGate(app, g) {
+    app.innerHTML = g === 'loading' ? '<div class="panel empty">🔐 Checking your login…</div>' : `
+      <div class="panel login-card">
+        <h2>🔐 World Keeper — log in</h2>
+        <p class="small muted">This world is private. Log in with the username and password your Dungeon Master gave you.</p>
+        <form id="gateForm" class="stack" autocomplete="on">
+          <div><label>Username</label><input name="user" required autocomplete="username" placeholder="e.g. admin or gustavs"></div>
+          <div><label>Password</label><input name="pass" type="password" required autocomplete="current-password"></div>
+          <button class="btn primary" type="submit">Log in</button>
+        </form>
+      </div>`;
+    const f = $('#gateForm'); if (!f) return;
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const btn = f.querySelector('button'); btn.disabled = true; btn.textContent = 'Logging in…';
+      try { await window.Cloud.signIn(f.elements.namedItem('user').value, f.elements.namedItem('pass').value); }
+      catch (err) { toast('⚠️ ' + (/invalid/i.test(err.message) ? 'Wrong username or password.' : err.message)); btn.disabled = false; btn.textContent = 'Log in'; }
+    };
+  }
+
+  // ================= PLAYERS (admin) =================
+  const makePassword = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; return Array.from(crypto.getRandomValues(new Uint8Array(12)), b => a[b % a.length]).join(''); };
+  async function renderPlayersBox() {
+    const box = $('#playersBox'); if (!box) return;
+    box.innerHTML = '<p class="small muted">Loading players…</p>';
+    let players = [];
+    try { players = (await window.Cloud.managePlayers({ action: 'list' })).players || []; }
+    catch (e) { box.innerHTML = `<p class="small">⚠️ ${esc(e.message)}</p>`; return; }
+    box.innerHTML = `
+      <ul class="members">${players.map(p => `<li>🧑 <b>${esc(p.name)}</b> <span class="muted small">username: ${esc(p.username)}</span>
+        <span style="margin-left:auto"><button class="btn small" data-reset="${esc(p.user_id)}">🔑 New password</button>
+        <button class="btn small danger" data-remove="${esc(p.user_id)}" data-pname="${esc(p.name)}">🗑</button></span></li>`).join('') || '<li class="muted small">No players yet.</li>'}</ul>
+      <form id="newPlayer" class="row" autocomplete="off" style="margin-top:8px">
+        <input name="pname" placeholder="Name (e.g. Gustavs)" required maxlength="60" style="flex:1 1 120px">
+        <input name="puser" placeholder="username (e.g. gustavs)" required maxlength="40" pattern="[a-zA-Z0-9._\\-]{2,40}" style="flex:1 1 120px">
+        <input name="ppass" placeholder="password (8+)" required minlength="8" style="flex:1 1 120px">
+        <button type="button" class="btn small" id="genPass" style="flex:0" title="Make a random password">🎲</button>
+        <button class="btn primary" type="submit" style="flex:0">+ Add player</button>
+      </form>`;
+    const f = $('#newPlayer'), el = k => f.elements.namedItem(k);
+    $('#genPass').onclick = () => { el('ppass').value = makePassword(); };
+    el('pname').oninput = () => { if (!el('puser').dataset.touched) el('puser').value = el('pname').value.toLowerCase().replace(/[^a-z0-9._-]/g, ''); };
+    el('puser').oninput = () => { el('puser').dataset.touched = '1'; };
+    f.onsubmit = async e => {
+      e.preventDefault();
+      try {
+        await window.Cloud.managePlayers({ action: 'create', name: el('pname').value.trim(), username: el('puser').value.trim().toLowerCase(), password: el('ppass').value });
+        toast(`🧑 ${el('pname').value} can now log in as "${el('puser').value.toLowerCase()}".`); renderPlayersBox();
+      } catch (err) { toast('⚠️ ' + err.message); }
+    };
+    box.querySelectorAll('[data-reset]').forEach(b => b.onclick = async () => {
+      const pw = prompt('New password (at least 8 characters):', makePassword()); if (!pw) return;
+      try { await window.Cloud.managePlayers({ action: 'reset', user_id: b.dataset.reset, password: pw }); toast('🔑 Password changed. New password: ' + pw); }
+      catch (err) { toast('⚠️ ' + err.message); }
+    });
+    box.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => {
+      if (!confirm(`Remove ${b.dataset.pname}? They can't log in any more, and the NPCs they added are deleted.`)) return;
+      try { await window.Cloud.managePlayers({ action: 'remove', user_id: b.dataset.remove }); toast('Player removed.'); renderPlayersBox(); }
+      catch (err) { toast('⚠️ ' + err.message); }
+    });
+  }
+
+  // ================= NPCs ADDED BY PLAYERS (admin inbox) =================
+  ui.playerNpcs = [];
+  async function loadPlayerNpcs() {
+    if (gateState() !== 'admin') return;
+    try { ui.playerNpcs = await window.Cloud.listPlayerNpcs(); } catch (e) { ui.playerNpcs = []; }
+    const b = $('#inboxBtn'); if (b) b.innerHTML = inboxLabel();
+  }
+  const inboxLabel = () => { const n = ui.playerNpcs.filter(p => p.status === 'new').length; return `📝 From players${n ? ` <span class="badge dead">${n} new</span>` : ` (${ui.playerNpcs.length})`}`; };
+  const candidates = () => state.npcs.filter(n => !n.ancestor).map(n => ({ n, cmp: { name: n.name, occupation: n.occupation, place: loc(n.locationId) ? loc(n.locationId).name : '' } }));
+  function renderPlayerInbox() {
+    const box = $('#npcDetail'); if (!box) return;
+    const all = candidates();
+    const list = [...ui.playerNpcs].sort((a, b) => (a.status === 'new' ? 0 : 1) - (b.status === 'new' ? 0 : 1) || String(b.created_at).localeCompare(String(a.created_at)));
+    box.innerHTML = `<h2>📝 NPCs added by players</h2>
+      <p class="small muted">When a player adds someone who looks like a known NPC, it is linked automatically. Here you also see matches with your <b>secret</b> NPCs (players never see those suggestions).</p>
+      ${list.map(p => {
+        const tops = all.map(c => ({ n: c.n, s: window.Similar.score({ name: p.name, occupation: p.occupation, place: p.location_name }, c.cmp) })).sort((a, b) => b.s - a.s).slice(0, 5);
+        const linked = npc(p.linked_npc_id);
+        return `<div class="field-view inbox-item ${p.status === 'new' ? 'new' : ''}">
+          <div class="row" style="justify-content:space-between"><div style="flex:1 1 240px"><b>${esc(p.name)}</b> <span class="muted small">${esc([p.race, p.occupation].filter(Boolean).join(' · '))}${p.location_name ? ' · met in ' + esc(p.location_name) : ''}</span>
+            <div class="small muted">added by ${esc(p.author_name || 'a player')} · ${esc(new Date(p.created_at).toLocaleDateString())} ${p.status === 'new' ? '<span class="badge dead">new</span>' : p.status === 'added' ? '<span class="badge">added to world</span>' : ''}</div></div>
+            <button class="btn small danger" data-pdel="${esc(p.id)}" style="flex:0">🗑</button></div>
+          ${p.description ? `<p class="small prewrap">${esc(p.description)}</p>` : ''}
+          <div class="small">${linked ? `🔗 Linked to <a href="#" data-goto="${linked.id}">${esc(linked.name)}</a>${p.link_reason ? ` <span class="muted">(${esc(p.link_reason)})</span>` : ''} <button class="btn small" data-unlink-p="${esc(p.id)}">Unlink</button>` : '<span class="muted">Not linked to anyone.</span>'}</div>
+          <div class="row" style="margin-top:6px">
+            <select data-psel="${esc(p.id)}" style="flex:2 1 220px">${tops.map(t => `<option value="${t.n.id}">${esc(t.n.name)} — ${Math.round(t.s * 100)}% alike${t.n.known ? '' : ' (🙈 secret)'}</option>`).join('')}</select>
+            <button class="btn small" data-plink="${esc(p.id)}" style="flex:0">🔗 Link</button>
+            <button class="btn small primary" data-padd="${esc(p.id)}" style="flex:0">➕ Add as new NPC</button>
+            ${p.status === 'new' ? `<button class="btn small" data-pseen="${esc(p.id)}" style="flex:0">✓ Seen</button>` : ''}
+          </div></div>`;
+      }).join('') || '<p class="muted">Nothing yet. When players add NPCs, they show up here.</p>'}`;
+    const C = window.Cloud, again = async () => { await loadPlayerNpcs(); renderPlayerInbox(); };
+    box.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; renderNpcList(); renderNpcDetail(); });
+    box.querySelectorAll('[data-pdel]').forEach(b => b.onclick = async () => { if (confirm('Delete this player note?')) { await C.deletePlayerNpc(b.dataset.pdel); again(); } });
+    box.querySelectorAll('[data-pseen]').forEach(b => b.onclick = async () => { await C.updatePlayerNpc(b.dataset.pseen, { status: 'seen' }); again(); });
+    box.querySelectorAll('[data-unlink-p]').forEach(b => b.onclick = async () => { await C.updatePlayerNpc(b.dataset.unlinkP, { linked_npc_id: null, link_reason: '' }); again(); });
+    box.querySelectorAll('[data-plink]').forEach(b => b.onclick = async () => {
+      const id = box.querySelector(`[data-psel="${b.dataset.plink}"]`).value;
+      await C.updatePlayerNpc(b.dataset.plink, { linked_npc_id: id, link_reason: 'linked by the DM', status: 'seen' }); toast('🔗 Linked.'); again();
+    });
+    box.querySelectorAll('[data-padd]').forEach(b => b.onclick = async () => {
+      const p = ui.playerNpcs.find(x => x.id === b.dataset.padd);
+      const L = state.locations.find(l => l.id === p.location_id) || state.locations.find(l => window.Similar.nameScore(l.name, p.location_name) > 0.85);
+      const n = { id: uid(), name: p.name, race: p.race || '', gender: '', age: '', occupation: p.occupation || '', alignment: 'True Neutral', status: 'Alive',
+        description: p.description || '', notes: `Added by ${p.author_name || 'a player'}.`, locationId: L ? L.id : null, known: true,
+        parents: [], spouses: [], siblings: [], bonds: [], factions: [], portrait: '' };
+      state.npcs.push(n); save();
+      await C.updatePlayerNpc(p.id, { linked_npc_id: n.id, link_reason: 'added to the world by the DM', status: 'added' });
+      toast(`➕ ${p.name} is now an NPC (players can see them).`); ui.npcId = n.id; renderNpcList(); again();
+    });
+  }
+  function playerNotesHtml(n) {
+    const notes = ui.playerNpcs.filter(p => p.linked_npc_id === n.id);
+    if (!notes.length) return '';
+    return `<div><h3>📝 Player notes</h3>${notes.map(p => `<div class="field-view small"><b>${esc(p.author_name || 'A player')}</b> wrote${p.name !== n.name ? ` (as "${esc(p.name)}")` : ''}: ${esc(p.description || '—')}</div>`).join('')}</div>`;
+  }
+
   // ================= TRAVEL SIMULATION =================
   // Traders, nobles and couriers walk their route one day at a time. Each "🌙 End the day" moves everyone.
   const KIND_LABEL = { trader: '🐎 Trader', noble: '👑 Noble', courier: '🦅 Courier' };
@@ -1175,6 +1328,8 @@
         <div class="row" style="margin-top:10px;justify-content:flex-start">
           <button class="btn small" id="mapHide" style="flex:0">${m.hidden ? '🙈 Hidden from players — show' : '👁 Players can see this map — hide'}</button>
           <button class="btn small" id="mapRename" style="flex:0">✏️ Rename</button>
+          <label class="btn small" style="flex:0;margin:0;color:var(--text)" title="Players see this picture instead — upload a version of the map without place names">🎭 ${m.playerSrc ? 'Change' : 'Add'} player version (no names)<input type="file" id="mapPlayerUpload" accept="image/*" hidden></label>
+          ${m.playerSrc ? '<button class="btn small" id="mapPlayerRemove" style="flex:0">Remove player version</button>' : ''}
           <button class="btn small danger" id="mapDelete" style="flex:0">🗑 Delete map</button>
         </div>` : ''}
       </div>`;
@@ -1200,6 +1355,11 @@
     };
     app.querySelectorAll('[data-pin]').forEach(b => b.onclick = e => { e.stopPropagation(); ui.pinSel = b.dataset.pin; renderMaps(app); });
     $('#mapHide').onclick = () => { m.hidden = !m.hidden; save(); renderMaps(app); };
+    $('#mapPlayerUpload').onchange = async e => {
+      try { m.playerSrc = await readMapImage(e.target.files[0]); save(); toast('🎭 Players now see this version of the map.'); renderMaps(app); }
+      catch (err) { toast("⚠️ That file isn't a picture I can read."); }
+    };
+    const mpr = $('#mapPlayerRemove'); if (mpr) mpr.onclick = () => { m.playerSrc = ''; save(); renderMaps(app); };
     $('#mapRename').onclick = () => { const n = prompt('New name for this map:', m.name); if (n && n.trim()) { m.name = n.trim().slice(0, 60); save(); renderMaps(app); } };
     $('#mapDelete').onclick = () => {
       if (!confirm(`Delete the map "${m.name}"? Your places and NPCs stay — only the picture and its pins are removed.`)) return;
@@ -1575,42 +1735,30 @@
       };
       return;
     }
-    const link = C.playerLink();
     box.innerHTML = `
       <h2>☁️ Cloud</h2>
-      <p>Logged in as <b>${esc(C.user.email)}</b> · <span id="cloudState">${esc(syncText(C.status, C.statusMsg))}</span></p>
+      <p>Logged in as <b>${esc(C.user.email)}</b> (admin) · <span id="cloudState">${esc(syncText(C.status, C.statusMsg))}</span></p>
       <div class="row" style="justify-content:flex-start">
         <button class="btn" id="syncNow" style="flex:0">🔄 Sync now</button>
-        <button class="btn" id="logout" style="flex:0">Log out</button>
+        <button class="btn" id="logout" style="flex:0">🚪 Log out</button>
       </div>
       <hr style="border-color:var(--line)">
-      <h3>🎭 Player view</h3>
-      <p class="small">Send this link to your players. They see NPCs marked <b>👁 Players have met</b>, places that aren't secret, public factions and the market.
-      They <b>never</b> see secret notes, alignments, hidden NPCs or secret relationships. It updates when you save.</p>
-      ${link ? `<div class="row"><input id="playerLink" readonly value="${esc(link)}" style="flex:3 1 260px">
-        <button class="btn primary" id="copyLink" style="flex:0">📋 Copy</button>
-        <a class="btn" href="${esc(link)}" target="_blank" rel="noopener" style="flex:0;text-decoration:none">Open</a></div>
-        <p class="small muted">Link leaked to the wrong people? <button class="btn small danger" id="newLink">Make a new link</button> (the old one stops working)</p>`
-        : '<p class="small muted">Your link appears after the first sync.</p>'}
-      <p class="small muted">${state.npcs.filter(n => n.known).length} of ${state.npcs.length} NPCs are visible to players.</p>`;
+      <h3>👥 Players</h3>
+      <p class="small">Players log in at <a href="player.html" target="_blank" rel="noopener">player.html</a> with their username and password.
+      They can only <b>add NPCs they meet</b> and <b>look at the maps</b> (no pins, no place names). They see the NPCs you mark <b>👁 Players have met</b> — never your secrets.</p>
+      <div id="playersBox"></div>
+      <p class="small muted">${state.npcs.filter(n => n.known).length} NPCs are visible to players.</p>`;
     $('#syncNow').onclick = () => C.push();
-    $('#logout').onclick = async () => { await C.signOut(); toast('Logged out. Your world stays on this device.'); renderSettings($('#app')); };
-    const cp = $('#copyLink');
-    if (cp) cp.onclick = async () => {
-      try { await navigator.clipboard.writeText(link); toast('📋 Link copied!'); } catch (e) { $('#playerLink').select(); toast('Select the link and copy it.'); }
-    };
-    const nl = $('#newLink');
-    if (nl) nl.onclick = async () => {
-      if (!confirm('Make a new player link? The old link will stop working.')) return;
-      try { await C.regenerateLink(); toast('New link made.'); renderSettings($('#app')); } catch (e) { toast('⚠️ ' + e.message); }
-    };
+    $('#logout').onclick = async () => { await C.signOut(); location.reload(); };
+    renderPlayersBox();
   }
 
   function syncText(s, msg) {
     return ({ local: '', 'signed-out': '☁️ Not logged in', pending: '⏳ Saving…', syncing: '🔄 Syncing…',
-      synced: '☁️ Saved to cloud', error: '⚠️ Not synced' }[s] || '') + (s === 'error' && msg ? ' — ' + msg : '');
+      synced: '☁️ Saved to cloud', error: '⚠️ Not synced', loading: '', player: '🧑 Player' }[s] || '') + (s === 'error' && msg ? ' — ' + msg : '');
   }
   function renderSync(s, msg) {
+    if (gateState() !== lastGate) { route(); if (gateState() === 'admin') loadPlayerNpcs(); }
     const el = $('#syncStatus'); if (!el) return;
     el.textContent = syncText(s, '');
     el.title = msg || '';
@@ -1618,7 +1766,7 @@
     el.hidden = s === 'local';
     const cs = $('#cloudState'); if (cs) cs.textContent = syncText(s, msg);
     // the player link only exists after the first upload — show it as soon as it's ready
-    if (s === 'synced' && $('#cloudPanel') && !$('#playerLink') && window.Cloud && window.Cloud.user && window.Cloud.playerLink()) renderCloudPanel();
+
   }
 
   // The player-safe copy: ONLY what players are allowed to see. No secrets ever go in here.
@@ -1630,21 +1778,18 @@
     const lid = new Set(locations.map(l => l.id));
     const factions = state.factions.filter(f => f.public).map(({ id, name, type, color }) => ({ id, name, type, color }));
     const fid = new Set(factions.map(f => f.id));
-    const m = window.Market._state();
     return {
-      version: 1,
+      version: 2,
       npcs: known.map(n => ({
-        travelTo: n.travel && n.travel.road && lid.has(n.travel.road.to) ? n.travel.road.to : null,
         id: n.id, name: n.name, race: n.race, gender: n.gender, age: n.age, occupation: n.occupation, status: n.status,
-        description: n.description, portrait: n.portrait, locationId: lid.has(n.locationId) ? n.locationId : null,
+        description: n.description, portrait: n.portrait,
         parents: n.parents.filter(x => kid.has(x)), spouses: n.spouses.filter(x => kid.has(x)), siblings: n.siblings.filter(x => kid.has(x)),
         bonds: n.bonds.filter(b => kid.has(b.id) && !SECRET_BONDS.includes(b.type)).map(b => ({ id: b.id, type: b.type })),
         factions: n.factions.filter(f => fid.has(f.id)).map(f => ({ id: f.id, rank: f.rank })),
       })),
-      locations, factions,
-      maps: state.maps.filter(mp => !mp.hidden).map(mp => ({ id: mp.id, name: mp.name, src: mp.src,
-        pins: Object.fromEntries(Object.entries(mp.pins).filter(([lid]) => lid && locations.some(l => l.id === lid))) })),
-      market: { seed: m.seed, daysAdvanced: m.daysAdvanced, events: m.events, customItems: m.customItems, hiddenItems: m.hiddenItems || [], cityId: lid.has(m.cityId) ? m.cityId : null },
+      factions,
+      // players only see the map pictures: no pins and no place names (uses the "player version" picture if you uploaded one)
+      maps: state.maps.filter(mp => !mp.hidden).map((mp, i) => ({ id: mp.id, name: `Map ${i + 1}`, src: mp.playerSrc || mp.src })),
     };
   }
   window.World.buildPlayerData = buildPlayerData;
@@ -1658,12 +1803,13 @@
       window.Market.reload();
     }
     const d = { ...data }; delete d.market;
-    state = normalize(d); saveLocal();
+    state = normalize(d); loadFailed = false; saveLocal();
     if (migratedToFrindeval) { migratedToFrindeval = false; save(); }
     if (!ui.editing) route();
   }
 
   route();
+  window.addEventListener('focus', () => loadPlayerNpcs());
   window.Market.onChange = () => { if (window.Cloud) window.Cloud.changed(); };
   // every "🌙 End the day" in the market also moves the travellers
   window.Market.onDayEnd = () => {
