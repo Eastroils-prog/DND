@@ -185,3 +185,16 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold-dim); 
 .timepick input { width: 70px; padding: 5px 8px; }
 .timepick select { width: auto; padding: 5px 8px; }
 @media (hover: none) { .hide-touch { display: none; } }
+
+/* ---------- Maps ---------- */
+.map-tools { margin: 4px 0 10px; }
+.map-scroll { overflow: auto; max-height: 78vh; border: 1px solid var(--line); border-radius: var(--radius); background: #15110d; }
+.map-inner { position: relative; min-width: 100%; }
+.map-inner img { display: block; width: 100%; height: auto; user-select: none; }
+.map-inner img.placing { cursor: crosshair; outline: 3px dashed var(--gold); outline-offset: -3px; }
+.pin { position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; padding: 0;
+  border: 3px solid #fff; background: var(--red); box-shadow: 0 1px 6px rgba(0,0,0,.7); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font: 700 10px system-ui, sans-serif; color: #fff; }
+.pin:hover, .pin.sel { background: var(--gold); color: #1b1712; transform: translate(-50%, -50%) scale(1.3); z-index: 2; }
+.pin.secret { border-style: dashed; background: #6a3a8a; }
+.pin-card { margin-top: 10px; }

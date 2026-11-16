@@ -13,7 +13,7 @@
     'Friend': 'Friend', 'Best friend': 'Best friend', 'Rival': 'Rival', 'Enemy': 'Enemy', 'Lover': 'Lover', 'Ally': 'Ally',
     'Business partner': 'Business partner', 'Employer': 'Employee', 'Employee': 'Employer', 'Mentor': 'Student', 'Student': 'Mentor',
     'Owes money to them': 'Is owed money by them', 'Is owed money by them': 'Owes money to them', 'Secretly hates': 'Is secretly hated by',
-    'Is secretly hated by': 'Secretly hates',
+    'Is secretly hated by': 'Secretly hates', 'Betrothed': 'Betrothed',
   };
   const BAD_BONDS = ['Rival', 'Enemy', 'Secretly hates', 'Is secretly hated by'];
   const FACTION_TYPES = ['Guild', 'Noble house', 'Cult', 'Army / military', 'Thieves guild', 'Church / temple', 'Merchant company', 'Secret society', 'Adventuring party', 'Other'];
@@ -25,6 +25,7 @@
 
   // ---------- helpers ----------
   const $ = (sel, el = document) => el.querySelector(sel);
+  const addUnique = (arr, v) => { if (!arr.includes(v)) arr.push(v); };
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   // SECURITY: every piece of text you type goes through esc() before it is shown,
   // so names like <script> can't run code in the page.
@@ -39,37 +40,89 @@
   window.toast = toast;
 
   // ---------- data ----------
-  function sampleWorld() {
-    const L = (name, type, region, notes, priceMod = 1, warExposure = 1) => ({ id: uid(), name, type, region, notes, priceMod, warExposure });
-    const oak = L('Oakvale', 'Village', 'The Green Marches', 'A quiet farming village near the border. Now full of refugees.', 0.9, 1.3);
-    const inn = L('The Prancing Griffin', 'Tavern / Inn', 'Oakvale', 'Best (and only) inn in Oakvale.', 1, 1.3);
-    const keep = L('Stonewatch Keep', 'Castle / Keep', 'The Green Marches', 'Border fortress. The war started here.', 1.3, 1.7);
-    const port = L('Saltmere', 'City', 'The Southern Coast', 'Rich trading port far from the fighting.', 1.15, 0.6);
-    const N = (o) => ({ id: uid(), race: 'Human', gender: '', age: '', occupation: '', alignment: 'True Neutral', status: 'Alive',
-      description: '', notes: '', parents: [], spouses: [], siblings: [], bonds: [], factions: [], portrait: '', locationId: null, ...o });
-    const durgan = N({ name: 'Old Durgan Ironfoot', race: 'Dwarf', gender: 'Male', age: '312', occupation: 'Retired blacksmith', status: 'Dead', locationId: oak.id, description: 'Founded the Ironfoot forge.' });
-    const brom = N({ name: 'Brom Ironfoot', race: 'Dwarf', gender: 'Male', age: '160', occupation: 'Blacksmith', alignment: 'Lawful Good', locationId: oak.id, description: 'Gruff but kind. Working day and night making swords for the war.', notes: 'Secretly sells weapons to both sides.' });
-    const hilda = N({ name: 'Hilda Ironfoot', race: 'Dwarf', gender: 'Female', age: '150', occupation: 'Brewer', alignment: 'Neutral Good', locationId: inn.id, description: 'Brews the strongest beer in the Marches.' });
-    const torin = N({ name: 'Torin Ironfoot', race: 'Dwarf', gender: 'Male', age: '45', occupation: 'Soldier', alignment: 'Chaotic Good', locationId: keep.id, description: 'Joined the army two weeks ago.' });
-    const mara = N({ name: 'Mara Ironfoot', race: 'Dwarf', gender: 'Female', age: '38', occupation: 'Apprentice smith', locationId: oak.id });
-    const elsa = N({ name: 'Elsa Brightwater', race: 'Half-Elf', gender: 'Female', age: '61', occupation: 'Innkeeper', alignment: 'Neutral Good', locationId: inn.id, description: 'Knows every rumour in town.', notes: 'Is a spy for the queen.' });
-    brom.parents = [durgan.id];
-    brom.spouses = [hilda.id]; hilda.spouses = [brom.id];
-    torin.parents = [brom.id, hilda.id]; mara.parents = [brom.id, hilda.id];
-    const vex = N({ name: 'Lord Aldric Vex', gender: 'Male', age: '52', occupation: 'Grain merchant', alignment: 'Neutral Evil', locationId: port.id,
-      description: 'Smiling, perfumed, always counting.', notes: 'Is hoarding grain to drive up the price of bread during the war.' });
-    const smiths = { id: uid(), name: 'The Iron Brotherhood', type: 'Guild', color: '#c98a3d', hqId: oak.id, goals: 'Keep the forges burning and the prices fair.', notes: '' };
-    const eyes = { id: uid(), name: "The Queen's Eyes", type: 'Secret society', color: '#7a6ad8', hqId: null, goals: 'Watch everyone. Report everything.', notes: 'Nobody knows who leads it.' };
-    const guild = { id: uid(), name: 'Saltmere Trading Company', type: 'Merchant company', color: '#3d9a8b', hqId: port.id, goals: 'Profit from the war.', notes: '' };
-    brom.factions = [{ id: smiths.id, rank: 'Guildmaster' }]; mara.factions = [{ id: smiths.id, rank: 'Apprentice' }];
-    elsa.factions = [{ id: eyes.id, rank: 'Agent' }]; vex.factions = [{ id: guild.id, rank: 'Senior partner' }];
-    const world = { version: 2, locations: [oak, inn, keep, port], factions: [smiths, eyes, guild], npcs: [durgan, brom, hilda, torin, mara, elsa, vex] };
-    const link = (a, t, b) => { a.bonds.push({ id: b.id, type: t, note: '' }); b.bonds.push({ id: a.id, type: BONDS[t], note: '' }); };
-    link(elsa, 'Best friend', hilda); link(mara, 'Mentor', brom); link(brom, 'Enemy', vex); link(elsa, 'Secretly hates', vex);
-    [durgan, brom, hilda, torin, mara, elsa].forEach(n => { n.known = true; });
-    smiths.public = true; guild.public = true;
+  // ---------- your world: Frindeval (data lives in world-data.js) ----------
+  function buildFrindeval() {
+    const W = window.FRINDEVAL;
+    const world = { version: 3, frindeval: 1, locations: [], factions: [], npcs: [], maps: [] };
+    if (!W) return world;
+    const id = {};
+    world.maps = W.maps.map(m => ({ id: m.id, name: m.name, src: m.src, hidden: !!m.hidden, pins: {} }));
+    world.locations = W.locations.map(l => {
+      const L = { id: (id['L:' + l.key] = uid()), name: l.name, type: l.type, region: l.region, notes: l.notes || '',
+        priceMod: l.priceMod || 1, warExposure: l.warExposure || 1, hidden: !!l.hidden };
+      for (const [mid, xy] of Object.entries(l.pins || {})) { const m = world.maps.find(x => x.id === mid); if (m) m.pins[L.id] = xy; }
+      return L;
+    });
+    world.factions = W.factions.map(f => ({ id: (id['F:' + f.key] = uid()), name: f.name, type: f.type, color: f.color,
+      hqId: id['L:' + f.hq] || null, goals: f.goals || '', notes: f.notes || '', public: !!f.public }));
+    W.npcs.forEach(n => { id['N:' + n.key] = uid(); });
+    world.npcs = W.npcs.map(n => ({
+      id: id['N:' + n.key], name: n.name, race: n.race || '', gender: n.gender || '', age: n.age || '', occupation: n.occupation || '',
+      alignment: n.alignment || 'True Neutral', status: n.status || 'Alive', description: n.description || '', notes: n.notes || '',
+      locationId: id['L:' + n.loc] || null, known: !!n.known, portrait: '',
+      parents: (n.parents || []).map(k => id['N:' + k]).filter(Boolean), spouses: [], siblings: [], bonds: [],
+      factions: (n.factions || []).map(([k, rank]) => ({ id: id['F:' + k], rank })).filter(f => f.id),
+    }));
+    const byKey = k => world.npcs.find(x => x.id === id['N:' + k]);
+    W.npcs.forEach(n => {
+      if (!n.spouse) return;
+      const a = byKey(n.key), b = byKey(n.spouse);
+      if (a && b) { addUnique(a.spouses, b.id); addUnique(b.spouses, a.id); }
+    });
+    W.bonds.forEach(([ak, type, bk, note]) => {
+      const a = byKey(ak), b = byKey(bk);
+      if (!a || !b || !BONDS[type]) return;
+      a.bonds.push({ id: b.id, type, note: note || '' }); b.bonds.push({ id: a.id, type: BONDS[type], note: note || '' });
+    });
     return world;
   }
+  const sampleWorld = buildFrindeval;
+
+  // One-time switch from the old example world (Oakvale & the Ironfoots) to Frindeval.
+  // Anything YOU made yourself is kept.
+  const OLD_EXAMPLE = {
+    locations: ['Oakvale', 'The Prancing Griffin', 'Stonewatch Keep', 'Saltmere'],
+    npcs: ['Old Durgan Ironfoot', 'Brom Ironfoot', 'Hilda Ironfoot', 'Torin Ironfoot', 'Mara Ironfoot', 'Elsa Brightwater', 'Lord Aldric Vex'],
+    factions: ['The Iron Brotherhood', "The Queen's Eyes", 'Saltmere Trading Company'],
+  };
+  let migratedToFrindeval = false;
+  function migrateToFrindeval(s) {
+    const oldL = new Set(s.locations.filter(l => OLD_EXAMPLE.locations.includes(l.name)).map(l => l.id));
+    const oldN = new Set(s.npcs.filter(n => OLD_EXAMPLE.npcs.includes(n.name)).map(n => n.id));
+    const oldF = new Set(s.factions.filter(f => OLD_EXAMPLE.factions.includes(f.name)).map(f => f.id));
+    s.locations = s.locations.filter(l => !oldL.has(l.id));
+    s.factions = s.factions.filter(f => !oldF.has(f.id));
+    s.npcs = s.npcs.filter(n => !oldN.has(n.id));
+    s.npcs.forEach(n => {
+      if (oldL.has(n.locationId)) n.locationId = null;
+      ['parents', 'spouses', 'siblings'].forEach(k => { n[k] = n[k].filter(x => !oldN.has(x)); });
+      n.bonds = n.bonds.filter(b => !oldN.has(b.id));
+      n.factions = n.factions.filter(f => !oldF.has(f.id));
+    });
+    const F = buildFrindeval();
+    // if you already made a place with the same name, keep yours and point Frindeval's NPCs at it
+    const same = {};
+    F.locations = F.locations.filter(l => {
+      const mine = s.locations.find(x => x.name.toLowerCase() === l.name.toLowerCase());
+      if (mine) {
+        same[l.id] = mine.id;
+        if (!mine.notes) Object.assign(mine, { notes: l.notes, region: mine.region || l.region, type: mine.type || l.type,
+          priceMod: l.priceMod, warExposure: l.warExposure });
+        return false;
+      }
+      return true;
+    });
+    F.npcs.forEach(n => { if (same[n.locationId]) n.locationId = same[n.locationId]; });
+    F.factions.forEach(f => { if (same[f.hqId]) f.hqId = same[f.hqId]; });
+    F.maps.forEach(m => { for (const [lid, xy] of Object.entries(m.pins)) if (same[lid]) { m.pins[same[lid]] = xy; delete m.pins[lid]; } });
+    s.locations.push(...F.locations); s.factions.push(...F.factions); s.npcs.push(...F.npcs);
+    if (!s.maps || !s.maps.length) s.maps = F.maps;
+    s.frindeval = 1; s.version = 3;
+    migratedToFrindeval = true;
+    return s;
+  }
+
+  const safeMapSrc = s => (typeof s === 'string' && /^maps\/[\w.-]+\.(jpg|jpeg|png|webp)$/.test(s)) ? s : safeImg(s);
   function normalize(s) {
     if (!s || typeof s !== 'object') return sampleWorld();
     s.locations = (Array.isArray(s.locations) ? s.locations : []).filter(l => l && l.id).map(l => ({
@@ -87,6 +140,14 @@
     s.factions.forEach(f => { if (!/^#[0-9a-fA-F]{6}$/.test(f.color)) f.color = '#c98a3d'; f.public = f.public === true; });
     s.npcs.forEach(n => { n.known = n.known === true; });
     s.locations.forEach(l => { l.hidden = l.hidden === true; });
+    s.maps = (Array.isArray(s.maps) ? s.maps : []).filter(m => m && m.id && safeMapSrc(m.src)).map(m => {
+      const pins = {};
+      for (const [lid, xy] of Object.entries(m.pins || {})) {
+        if (Array.isArray(xy) && xy.length === 2 && xy.every(v => Number.isFinite(v) && v >= 0 && v <= 100)) pins[lid] = xy;
+      }
+      return { id: String(m.id), name: String(m.name || 'Map'), src: safeMapSrc(m.src), hidden: m.hidden === true, pins };
+    });
+    if (!s.frindeval) migrateToFrindeval(s);
     return s;
   }
   function load() {
@@ -99,6 +160,11 @@
   // every change: save in this browser, then tell the cloud (if you're logged in it uploads a moment later)
   function save() { saveLocal(); if (window.Cloud) window.Cloud.changed(); }
   let state = load(); saveLocal();
+  if (migratedToFrindeval) {
+    migratedToFrindeval = false;
+    if (window.Cloud) window.Cloud.changed(); // upload the new world next time you're logged in
+    setTimeout(() => toast('🗺 Welcome to Frindeval! The old example towns were replaced with your world.'), 400);
+  }
 
   const npc = id => state.npcs.find(n => n.id === id);
   const loc = id => state.locations.find(l => l.id === id);
@@ -118,7 +184,6 @@
     }
     return false;
   }
-  const addUnique = (arr, v) => { if (!arr.includes(v)) arr.push(v); };
   const remove = (arr, v) => { const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); };
 
   function addRelation(aId, type, bId) {
@@ -235,7 +300,7 @@
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab !== 'market') window.Market.stop();
     const app = $('#app');
-    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings, cloud: renderSettings }[tab] || renderNpcs)(app);
+    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, maps: renderMaps, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings, cloud: renderSettings }[tab] || renderNpcs)(app);
   }
   // lets the market read your locations (for city prices)
   window.World = { locations: () => state.locations, esc };
@@ -338,7 +403,7 @@
         ${n.portrait ? '<button class="btn small danger" id="rmPortrait" style="flex:0">Remove picture</button>' : ''}
       </div>
       <div class="stack" style="margin-top:14px">
-        <div class="field-view"><div class="k">📍 Location</div>${l ? `<a href="#" id="gotoLoc">${esc(l.name)}</a> <span class="muted small">${esc(l.type || '')}${l.region ? ' · ' + esc(l.region) : ''}</span>` : '<span class="muted">Unknown / wandering</span>'}</div>
+        <div class="field-view"><div class="k">📍 Location</div>${l ? `<a href="#" id="gotoLoc">${esc(l.name)}</a>${state.maps.some(m => m.pins[l.id]) ? ' <button class="btn small" id="npcOnMap" type="button">🗺 On map</button>' : ''} <span class="muted small">${esc(l.type || '')}${l.region ? ' · ' + esc(l.region) : ''}</span>` : '<span class="muted">Unknown / wandering</span>'}</div>
         ${n.description ? `<div class="field-view prewrap"><div class="k">Description</div>${esc(n.description)}</div>` : ''}
         ${n.notes ? `<div class="field-view prewrap secret"><div class="k">🤫 Secret DM notes</div>${esc(n.notes)}</div>` : ''}
         <div>
@@ -410,6 +475,7 @@
       deleteNpc(n.id); ui.npcId = null; toast(`${n.name} has been removed from the world.`); renderNpcs($('#app'));
     };
     const gl = $('#gotoLoc'); if (gl) gl.onclick = e => { e.preventDefault(); go('locations'); };
+    const om = $('#npcOnMap'); if (om) om.onclick = () => showOnMap(l.id);
     box.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; renderNpcList(); renderNpcDetail(); });
     box.querySelectorAll('[data-unlink]').forEach(b => b.onclick = () => {
       removeRelation(n.id, b.dataset.unlink, b.dataset.other); renderNpcDetail();
@@ -515,6 +581,7 @@
             <div class="small muted">💰 ${esc(labelOf(PRICE_LEVELS, L.priceMod))} prices · ⚔️ ${esc(labelOf(EXPOSURE, L.warExposure))}</div>
             <div class="row" style="margin-top:8px">
               <button class="btn small" data-prices="${L.id}">💰 Prices here</button>
+              ${state.maps.some(m => m.pins[L.id]) ? `<button class="btn small" data-showmap="${L.id}">🗺 On map</button>` : ''}
               <button class="btn small" data-print="${L.id}" ${people.length ? '' : 'disabled'}>🖨 Print NPCs</button>
             </div>
             <div class="row" style="margin-top:6px"><button class="btn small" data-edit="${L.id}">✏️ Edit</button><button class="btn small danger" data-del="${L.id}">🗑 Delete</button></div>
@@ -541,12 +608,14 @@
       const L = loc(b.dataset.del), count = state.npcs.filter(n => n.locationId === L.id).length;
       if (!confirm(`Delete ${L.name}?${count ? ` The ${count} NPC(s) living there will become "Unknown / wandering".` : ''}`)) return;
       state.locations = state.locations.filter(x => x.id !== L.id);
+      state.maps.forEach(mp => { delete mp.pins[L.id]; });
       state.npcs.forEach(n => { if (n.locationId === L.id) n.locationId = null; });
       if (ui.editLocId === L.id) ui.editLocId = null;
       save(); toast(`${L.name} was removed.`); renderLocations(app);
     });
     app.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
     app.querySelectorAll('[data-prices]').forEach(b => b.onclick = () => { window.Market.setCity(b.dataset.prices); go('market'); });
+    app.querySelectorAll('[data-showmap]').forEach(b => b.onclick = () => showOnMap(b.dataset.showmap));
     app.querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
       const people = state.npcs.filter(n => n.locationId === b.dataset.print).sort(byName);
       printNpcs(people, confirm('Include secret DM notes?\n\nOK = DM copy (with secrets)\nCancel = player copy'));
@@ -639,6 +708,118 @@
       printNpcs(membersOf(b.dataset.print).sort(byName), confirm('Include secret DM notes?\n\nOK = DM copy (with secrets)\nCancel = player copy'));
     });
     if (ui.facId) { const el = document.getElementById('fac-' + ui.facId); if (el) el.scrollIntoView({ block: 'center' }); }
+  }
+
+  // ================= MAPS =================
+  // Each map is a picture. A pin puts one of your locations at "x% from the left, y% from the top".
+  function readMapImage(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !file.type.startsWith('image/')) return reject(new Error('not an image'));
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => {
+        const scale = Math.min(1, 2000 / img.width), c = document.createElement('canvas');
+        c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+      img.src = url;
+    });
+  }
+  function renderMaps(app) {
+    const maps = state.maps;
+    if (!maps.find(m => m.id === ui.mapId)) ui.mapId = maps.length ? maps[0].id : null;
+    const m = maps.find(x => x.id === ui.mapId);
+    const zoom = ui.mapZoom || 100;
+    app.innerHTML = `
+      <div class="panel">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0;flex:0 1 auto">🗺 Maps</h2>
+          <label class="btn small" style="flex:0;margin:0;color:var(--text)">⬆️ Add your own map<input type="file" id="mapUpload" accept="image/*" hidden></label>
+        </div>
+        <div class="cat-chips" style="margin-top:10px">
+          ${maps.map(x => `<button class="btn small ${x.id === ui.mapId ? 'on' : ''}" data-map="${esc(x.id)}">${x.hidden ? '🙈 ' : ''}${esc(x.name)}</button>`).join('') || '<span class="muted">No maps yet — add one!</span>'}
+        </div>
+        ${m ? `
+        <div class="row map-tools">
+          <select id="pinLoc" style="flex:2 1 220px"><option value="">📍 Place or move a pin: choose a place…</option>
+            ${[...state.locations].sort(byName).map(l => `<option value="${l.id}" ${ui.pinLoc === l.id ? 'selected' : ''}>${m.pins[l.id] ? '✓ ' : ''}${esc(l.name)}</option>`).join('')}</select>
+          <span class="small muted" style="flex:1 1 140px">${ui.pinLoc ? '👆 now click on the map' : `${Object.keys(m.pins).length} places pinned`}</span>
+          <span class="row" style="flex:0 1 auto;gap:4px">${[100, 150, 200, 300].map(z => `<button class="btn small ${z === zoom ? 'on' : ''}" data-zoom="${z}">${z}%</button>`).join('')}</span>
+        </div>
+        <div class="map-scroll"><div class="map-inner" id="mapInner" style="width:${zoom}%">
+          <img src="${esc(m.src)}" alt="${esc(m.name)}" id="mapImg" draggable="false" class="${ui.pinLoc ? 'placing' : ''}">
+          ${Object.entries(m.pins).filter(([lid]) => loc(lid)).map(([lid, [x, y]]) => {
+            const L = loc(lid), n = state.npcs.filter(p => p.locationId === lid).length;
+            return `<button class="pin ${L.hidden ? 'secret' : ''} ${ui.pinSel === lid ? 'sel' : ''}" data-pin="${lid}" style="left:${x}%;top:${y}%" title="${esc(L.name)}${n ? ` — ${n} NPC${n === 1 ? '' : 's'}` : ''}">${n ? `<span>${n}</span>` : ''}</button>`;
+          }).join('')}
+        </div></div>
+        <div id="pinCard"></div>
+        <div class="row" style="margin-top:10px;justify-content:flex-start">
+          <button class="btn small" id="mapHide" style="flex:0">${m.hidden ? '🙈 Hidden from players — show' : '👁 Players can see this map — hide'}</button>
+          <button class="btn small" id="mapRename" style="flex:0">✏️ Rename</button>
+          <button class="btn small danger" id="mapDelete" style="flex:0">🗑 Delete map</button>
+        </div>` : ''}
+      </div>`;
+    app.querySelectorAll('[data-map]').forEach(b => b.onclick = () => { ui.mapId = b.dataset.map; ui.pinSel = null; ui.pinLoc = ''; renderMaps(app); });
+    $('#mapUpload').onchange = async e => {
+      try {
+        const src = await readMapImage(e.target.files[0]);
+        const name = (prompt('Name for this map?', e.target.files[0].name.replace(/\.[^.]+$/, '')) || 'My map').slice(0, 60);
+        const nm = { id: uid(), name, src, hidden: false, pins: {} };
+        state.maps.push(nm); ui.mapId = nm.id; save(); renderMaps(app);
+        toast(src.length > 1500000 ? '🗺 Map added. It\'s a big picture — keep a backup!' : '🗺 Map added!');
+      } catch (err) { toast("⚠️ That file isn't a picture I can read."); }
+    };
+    if (!m) return;
+    app.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => { ui.mapZoom = +b.dataset.zoom; renderMaps(app); });
+    $('#pinLoc').onchange = e => { ui.pinLoc = e.target.value; renderMaps(app); };
+    $('#mapImg').onclick = e => {
+      if (!ui.pinLoc) return;
+      const r = e.target.getBoundingClientRect();
+      const x = Math.round(((e.clientX - r.left) / r.width) * 1000) / 10, y = Math.round(((e.clientY - r.top) / r.height) * 1000) / 10;
+      m.pins[ui.pinLoc] = [Math.max(0, Math.min(100, x)), Math.max(0, Math.min(100, y))];
+      ui.pinSel = ui.pinLoc; ui.pinLoc = ''; save(); renderMaps(app); toast('📍 Pin placed!');
+    };
+    app.querySelectorAll('[data-pin]').forEach(b => b.onclick = e => { e.stopPropagation(); ui.pinSel = b.dataset.pin; renderMaps(app); });
+    $('#mapHide').onclick = () => { m.hidden = !m.hidden; save(); renderMaps(app); };
+    $('#mapRename').onclick = () => { const n = prompt('New name for this map:', m.name); if (n && n.trim()) { m.name = n.trim().slice(0, 60); save(); renderMaps(app); } };
+    $('#mapDelete').onclick = () => {
+      if (!confirm(`Delete the map "${m.name}"? Your places and NPCs stay — only the picture and its pins are removed.`)) return;
+      state.maps = state.maps.filter(x => x !== m); ui.mapId = null; save(); renderMaps(app);
+    };
+    renderPinCard(m);
+    const sel = app.querySelector('.pin.sel'); if (sel && ui.mapZoom > 100) sel.scrollIntoView({ block: 'center', inline: 'center' });
+  }
+  function renderPinCard(m) {
+    const box = $('#pinCard'), L = loc(ui.pinSel);
+    if (!box) return;
+    if (!L || !m.pins[L.id]) { box.innerHTML = '<p class="small muted" style="margin:10px 0 0">Click a pin to see who lives there.</p>'; return; }
+    const people = state.npcs.filter(n => n.locationId === L.id).sort(byName);
+    box.innerHTML = `<div class="field-view pin-card">
+      <div class="row" style="justify-content:space-between"><div style="flex:1 1 200px">
+        <h3 style="margin:0">${esc(L.name)} ${L.hidden ? '<span class="badge missing">🙈 secret</span>' : ''}</h3>
+        <div class="small muted">${esc(L.type || '')}${L.region ? ' · ' + esc(L.region) : ''} · 💰 ${esc(labelOf(PRICE_LEVELS, L.priceMod))} · ⚔️ ${esc(labelOf(EXPOSURE, L.warExposure))}</div></div>
+        <button class="btn-x" id="pinClose" title="Close">✕</button></div>
+      ${L.notes ? `<p class="small prewrap">${esc(L.notes.length > 400 ? L.notes.slice(0, 400) + '…' : L.notes)}</p>` : ''}
+      <ul class="members">${people.map(p => `<li>${avatar(p, 24)} <a href="#" data-goto="${p.id}">${esc(p.name)}</a> <span class="muted small">${esc(p.occupation || '')}</span></li>`).join('') || '<li class="muted small">No NPCs here yet.</li>'}</ul>
+      <div class="row" style="justify-content:flex-start">
+        <button class="btn small" id="pinNewNpc" style="flex:0">+ NPC here</button>
+        <button class="btn small" id="pinPrices" style="flex:0">💰 Prices here</button>
+        <button class="btn small" id="pinMove" style="flex:0">📍 Move pin</button>
+        <button class="btn small danger" id="pinRemove" style="flex:0">Remove pin</button>
+      </div></div>`;
+    $('#pinClose').onclick = () => { ui.pinSel = null; renderMaps($('#app')); };
+    box.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
+    $('#pinNewNpc').onclick = () => { ui.npcId = null; ui.draft = null; ui.locFilter = L.id; ui.editing = true; go('npcs'); };
+    $('#pinPrices').onclick = () => { window.Market.setCity(L.id); go('market'); };
+    $('#pinMove').onclick = () => { ui.pinLoc = L.id; renderMaps($('#app')); };
+    $('#pinRemove').onclick = () => { delete m.pins[L.id]; ui.pinSel = null; save(); renderMaps($('#app')); };
+  }
+  function showOnMap(lid) {
+    const m = state.maps.find(x => x.id === ui.mapId && x.pins[lid]) || state.maps.find(x => x.pins[lid]);
+    if (!m) return false;
+    ui.mapId = m.id; ui.pinSel = lid; ui.pinLoc = ''; go('maps'); return true;
   }
 
   // ================= FAMILY TREE =================
@@ -765,7 +946,7 @@
         <hr style="border-color:var(--line)">
         <h3>Danger zone</h3>
         <div class="row">
-          <button class="btn danger" id="sampleBtn" style="flex:0">Reset to example world</button>
+          <button class="btn danger" id="sampleBtn" style="flex:0">Reset to Frindeval (starting world)</button>
           <button class="btn danger" id="clearBtn" style="flex:0">Start with an empty world</button>
           <button class="btn danger" id="marketReset" style="flex:0">Reset market (war = 14 days ago)</button>
         </div>
@@ -789,8 +970,8 @@
         state = normalize(data); save(); location.reload();
       } catch (err) { toast("⚠️ That file doesn't look like a World Keeper backup."); }
     };
-    $('#sampleBtn').onclick = () => { if (confirm('Replace everything with the example world?')) { state = sampleWorld(); save(); ui.npcId = ui.treeId = null; toast('Example world loaded.'); renderSettings(app); } };
-    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 2, npcs: [], locations: [], factions: [] }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
+    $('#sampleBtn').onclick = () => { if (confirm('Replace EVERYTHING with the starting Frindeval world? Your own changes will be lost.')) { state = sampleWorld(); save(); ui.npcId = ui.treeId = null; toast('Frindeval loaded.'); renderSettings(app); } };
+    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 3, frindeval: 1, npcs: [], locations: [], factions: [], maps: state.maps.map(m => ({ ...m, pins: {} })) }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
     $('#marketReset').onclick = () => { if (confirm('Reset the market back to "war started 14 days ago"?')) { window.Market.reset(); toast('Market reset.'); } };
     renderCloudPanel();
   }
@@ -1023,6 +1204,8 @@
         factions: n.factions.filter(f => fid.has(f.id)).map(f => ({ id: f.id, rank: f.rank })),
       })),
       locations, factions,
+      maps: state.maps.filter(mp => !mp.hidden).map(mp => ({ id: mp.id, name: mp.name, src: mp.src,
+        pins: Object.fromEntries(Object.entries(mp.pins).filter(([lid]) => lid && locations.some(l => l.id === lid))) })),
       market: { seed: m.seed, daysAdvanced: m.daysAdvanced, events: m.events, customItems: m.customItems, hiddenItems: m.hiddenItems || [], cityId: lid.has(m.cityId) ? m.cityId : null },
     };
   }
@@ -1037,6 +1220,7 @@
     }
     const d = { ...data }; delete d.market;
     state = normalize(d); saveLocal();
+    if (migratedToFrindeval) { migratedToFrindeval = false; save(); }
     if (!ui.editing) route();
   }
 
