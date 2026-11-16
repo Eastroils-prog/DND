@@ -198,3 +198,29 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold-dim); 
 .pin:hover, .pin.sel { background: var(--gold); color: #1b1712; transform: translate(-50%, -50%) scale(1.3); z-index: 2; }
 .pin.secret { border-style: dashed; background: #6a3a8a; }
 .pin-card { margin-top: 10px; }
+.traveller { position: absolute; transform: translate(-50%, -50%); padding: 0; width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid #fff8; background: rgba(27,23,18,.85); font-size: 12px; line-height: 20px; cursor: pointer; z-index: 3; }
+.traveller.main { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-dim); }
+.traveller:hover { transform: translate(-50%, -50%) scale(1.3); }
+.travel-list { max-height: 260px; overflow: auto; margin-top: 6px; }
+.pin-card .members { max-height: 260px; overflow: auto; }
+.pin.dungeon { background: #2b1a3d; border-color: #c58aff; border-radius: 4px; transform: translate(-50%, -50%) rotate(45deg); }
+.pin.dungeon:hover, .pin.dungeon.sel { background: #c58aff; transform: translate(-50%, -50%) rotate(45deg) scale(1.3); }
+.pin.dungeon span { transform: rotate(-45deg); }
+
+/* ---------- Magic items ---------- */
+.view-tabs { margin-bottom: 14px; }
+.mtable-wrap { max-height: 70vh; overflow: auto; }
+.mtable { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.mtable th { text-align: left; color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.mtable td { padding: 6px 8px; border-bottom: 1px solid #ffffff10; vertical-align: top; }
+.mtable td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rar { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .75rem; border: 1px solid currentColor; white-space: nowrap; }
+.r-common { color: #c8c2b6; } .r-uncommon { color: #7cc48a; } .r-rare { color: #6fa8ff; }
+.r-veryrare { color: #c58aff; } .r-legendary { color: #f0a640; } .r-artifact { color: #ff6b6b; }
+.vestige { border-top: 1px solid var(--line); padding: 8px 0; }
+.vestige summary { cursor: pointer; }
+@media (max-width: 800px) { .mtable th:nth-child(4), .mtable td:nth-child(4) { display: none; } }
+.mtable-wrap { overflow-x: auto; }
+#magicView .panel { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 800px) { .mtable { font-size: .82rem; } .mtable th:nth-child(6), .mtable td:nth-child(6) { display: none; } }

@@ -132,6 +132,7 @@
       customItems: (Array.isArray(s.customItems) ? s.customItems : []).filter(i => i && i.id && i.base > 0 && i.war > 0),
       hiddenItems: (Array.isArray(s.hiddenItems) ? s.hiddenItems : []).filter(id => ITEMS.some(i => i.id === id)),
       cityId: s.cityId || null,
+      magicSalt: s.magicSalt && typeof s.magicSalt === 'object' ? s.magicSalt : {},
     };
   }
   ms = loadM();
@@ -334,6 +335,7 @@
   }
 
   // ---------- page rendering ----------
+  let mview = 'goods', mq = { search: '', rarity: '', source: '' };
   let root = null, selected = 'potion-healing', cat = 'All', hoverIdx = null, layout = null, drag = null;
   // The time window of the big chart, counted in "days ago": from 730 days ago up to 0 (= today)
   let view = { from: 730, to: 0 };
@@ -396,6 +398,12 @@
         </div>
       </div>
 
+      <div class="cat-chips view-tabs">
+        <button class="btn ${mview === 'goods' ? 'on' : ''}" data-view="goods">📈 Trade goods</button>
+        <button class="btn ${mview === 'magic' ? 'on' : ''}" data-view="magic">🔮 Magic items</button>
+      </div>
+      <div id="magicView" ${mview === 'magic' ? '' : 'hidden'}></div>
+      <div id="goodsView" ${mview === 'magic' ? 'hidden' : ''}>
       <div class="panel chart-panel" id="chartPanel"></div>
 
       <div class="split market-split">
@@ -431,7 +439,10 @@
             `<li>${esc(i.name)} <span class="muted small">${esc(i.unit)}</span> <button class="btn small" data-restore="${i.id}" style="margin-left:auto">↩ Restore</button></li>`).join('')}</ul>
           <button class="btn small" id="restoreAll">↩ Restore all</button>` : ''}`}
         </aside>
+      </div>
       </div>`;
+    root.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { mview = b.dataset.view; render(root); });
+    if (mview === 'magic') renderMagic();
     root.querySelector('#citySel').onchange = e => {
       ms.cityId = e.target.value || null; saveM(); for (const k in live) live[k] = 0; render(root);
     };
@@ -470,8 +481,8 @@
       window.toast && window.toast(`✨ ${name} is now sold at the market!`);
     };
     root.querySelector('#endDay').onclick = () => {
-      ms.daysAdvanced++; for (const k in live) live[k] = 0; saveM(); render(root);
-      window.toast && window.toast('🌙 A new day dawns. The market has moved.');
+      endDay(); render(root);
+      if (!window.Market.onDayEnd) window.toast && window.toast('🌙 A new day dawns. The market has moved.');
     };
     renderChartPanel(); renderGrid(); startLive();
   }
@@ -634,13 +645,119 @@
     }, 2500);
   }
 
+
+  // ================= MAGIC ITEMS =================
+  const RAR_CLASS = { common: 'r-common', uncommon: 'r-uncommon', rare: 'r-rare', 'very rare': 'r-veryrare', legendary: 'r-legendary', artifact: 'r-artifact' };
+  function magicMult(item) {
+    const c = currentCity();
+    let m = c ? (Number(c.priceMod) || 1) : 1;
+    // the war makes weapons, armour and healing magic more expensive — most of all near the front
+    if (item.type === 'Weapon' || item.type === 'Armor' || /Healing/.test(item.name)) m *= 1 + 0.5 * Math.min(1.5, levelAt(today())) * (c ? Number(c.warExposure) || 1 : 1);
+    return m;
+  }
+  const gp = v => `${Math.round(v).toLocaleString()} gp`;
+  const regionOk = (item, city) => item.source !== 'Frindeval' || (city && city.region === item.region);
+  function shopToday(city) {
+    const M = window.MAGIC, salt = (ms.magicSalt || {})[city.id] || 0;
+    const r = M.rng(M.hash(city.id + ':' + today() + ':' + salt));
+    const roll = 1 + Math.floor(r() * 100);
+    const mod = (M.PLACE_MOD[city.type] ?? -10) + (M.SPECIAL_MOD[city.name] || 0);
+    const total = roll + mod, row = M.D100.find(x => total <= x.max) || M.D100[M.D100.length - 1];
+    const items = [];
+    for (const [rar, dice] of Object.entries(row.stock)) {
+      const d = /^(\d+)d(\d+)$/.exec(dice);
+      let n = 0; if (d) for (let i = 0; i < +d[1]; i++) n += 1 + Math.floor(r() * +d[2]); else n = +dice;
+      const pool = [];
+      M.ITEMS.filter(i => i.rarity === rar && regionOk(i, city)).forEach(i => { for (let w = 0; w < (i.source === 'Frindeval' ? 4 : 1); w++) pool.push(i); });
+      for (let k = 0; k < n && pool.length; k++) {
+        const it = pool[Math.floor(r() * pool.length)];
+        if (!items.includes(it)) items.push(it);
+        for (let j = pool.length - 1; j >= 0; j--) if (pool[j] === it) pool.splice(j, 1);
+      }
+    }
+    return { roll, mod, total, row, items };
+  }
+  function renderMagic() {
+    const box = root.querySelector('#magicView'); if (!box || !window.MAGIC) return;
+    const M = window.MAGIC, city = currentCity();
+    const shop = city && city.type !== 'Dungeon' ? shopToday(city) : null;
+    const q = mq.search.trim().toLowerCase();
+    const list = M.ITEMS.filter(i => (!q || i.name.toLowerCase().includes(q) || (i.region || '').toLowerCase().includes(q))
+      && (!mq.rarity || i.rarity === mq.rarity) && (!mq.source || i.source === mq.source))
+      .sort((a, b) => M.RARITY_ORDER.indexOf(a.rarity) - M.RARITY_ORDER.indexOf(b.rarity) || a.name.localeCompare(b.name));
+    const row = it => `<tr>
+        <td><b>${esc(it.name)}</b>${it.text ? `<div class="small muted">${esc(it.text)}</div>` : ''}</td>
+        <td><span class="rar ${RAR_CLASS[it.rarity]}">${esc(it.rarity)}</span></td>
+        <td>${esc(it.type)}${it.attune ? ' <span title="Requires attunement">(A)</span>' : ''}</td>
+        <td>${esc(it.source)}</td>
+        <td class="num">${it.rarity === 'legendary' ? `<span class="muted">~${gp(it.price * magicMult(it))}</span>` : gp(it.price * magicMult(it))}</td>
+        <td class="small">${esc(it.source === 'Frindeval' ? 'Only in: ' + it.region : M.WHERE[it.rarity])}</td></tr>`;
+    box.innerHTML = `
+      <div class="split market-split">
+        <div class="stack">
+          <div class="panel">
+            <h2 style="margin:0">🔮 Magic shop ${city ? `in ${esc(city.name)}` : ''} <span class="small muted">· market day ${today() - 729 >= 0 ? '+' + (today() - 729) : ''}</span></h2>
+            ${!city ? '<p class="muted">Pick a place with <b>📍</b> at the top to see what its magic shop has today.</p>'
+              : !shop ? '<p class="muted">Nobody sells anything here… it\'s a dungeon.</p>'
+              : `<p class="small">🎲 d100 rolled <b>${shop.roll}</b> ${shop.mod >= 0 ? '+' : '−'} ${Math.abs(shop.mod)} (${esc(city.type || 'place')}${M.SPECIAL_MOD[city.name] ? ', ' + esc(city.name) : ''}) = <b>${shop.total}</b> → ${esc(shop.row.text)}
+                 ${readOnly ? '' : '<button class="btn small" id="reroll" style="margin-left:6px">🎲 Reroll</button>'}</p>
+                 ${shop.items.length ? `<div class="mtable-wrap"><table class="mtable"><thead><tr><th>Item</th><th>Rarity</th><th>Type</th><th>Book</th><th>Price here</th><th></th></tr></thead>
+                   <tbody>${shop.items.map(row).join('')}</tbody></table></div>` : '<p class="muted">The shelves are empty today. Try again tomorrow (🌙 End the day).</p>'}
+                 <p class="small muted">Stock changes every day. Prices include the local price level${levelAt(today()) > 0 ? ' and the war (weapons, armour and healing cost more near the front)' : ''}.</p>`}
+          </div>
+          <div class="panel">
+            <h3>📚 All magic items (${list.length})</h3>
+            <div class="row" style="margin-bottom:10px">
+              <input id="mqSearch" placeholder="🔍 Search items or regions…" value="${esc(mq.search)}" style="flex:2 1 200px">
+              <select id="mqRarity" style="flex:1 1 120px"><option value="">All rarities</option>${M.RARITY_ORDER.slice(0, 5).map(r => `<option ${mq.rarity === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
+              <select id="mqSource" style="flex:1 1 150px"><option value="">All books</option>${[['DMG', "Dungeon Master's Guide"], ['XGE', "Xanathar's Guide"], ['TCE', "Tasha's Cauldron"], ['Frindeval', '✨ Frindeval items']].map(([v, l]) => `<option value="${v}" ${mq.source === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            </div>
+            <div class="mtable-wrap"><table class="mtable"><thead><tr><th>Item</th><th>Rarity</th><th>Type</th><th>Book</th><th>Price${city ? ' here' : ''}</th><th>Where to find</th></tr></thead>
+              <tbody>${list.map(row).join('')}</tbody></table></div>
+            <p class="small muted">(A) = needs attunement. Prices use Xanathar's ranges per rarity (consumables half price). Rules text is in your books.</p>
+          </div>
+        </div>
+        <aside class="stack">
+          <div class="panel">
+            <h3>🎲 d100: What's in the shop today?</h3>
+            <p class="small muted">Roll d100 and add: Village −20, Town ±0, City +10, Castle ±0, Wilderness −40. Bonus: Kentia & Tuvar +10, Tavlar +15, Antvere/Odeila/Iceforge +5.</p>
+            <table class="mtable d100"><thead><tr><th>Total</th><th>For sale</th></tr></thead><tbody>
+              ${M.D100.map((r, i) => `<tr><td class="num">${i === 0 ? '≤ ' + r.max : (M.D100[i - 1].max + 1) + (r.max >= 999 ? '+' : '–' + r.max)}</td><td>${esc(r.text)}</td></tr>`).join('')}
+            </tbody></table>
+            <p class="small muted">Regional ✨ Frindeval items only appear in their own region's shops (4× more likely there). Legendary items and artifacts are never sold.</p>
+          </div>
+          ${readOnly ? '' : `<div class="panel">
+            <h3>⚱️ The six Vestiges</h3>
+            <p class="small muted">Artifacts of the Forgotten God. Never for sale. Each lies in a secret dungeon (🙈 hidden from players) — the challenge rises by 2 each time.</p>
+            ${M.VESTIGES.map(v => `<details class="vestige"><summary><b>${v.n}. ${esc(v.name)}</b> <span class="rar r-artifact">CR ${v.cr}</span></summary>
+              <div class="small muted">${esc(v.type)}</div>
+              <p class="small prewrap">${esc(v.lore)}</p>
+              <p class="small"><b>📍 ${esc(v.place)}:</b> ${esc(v.dungeon)}</p>
+              <button class="btn small" data-vmap="${esc(v.place)}">🗺 Show on map</button></details>`).join('')}
+          </div>`}
+        </aside>
+      </div>`;
+    const rr = box.querySelector('#reroll');
+    if (rr) rr.onclick = () => { ms.magicSalt = ms.magicSalt || {}; ms.magicSalt[city.id] = (ms.magicSalt[city.id] || 0) + 1; saveM(); renderMagic(); };
+    const s1 = box.querySelector('#mqSearch');
+    s1.oninput = e => { mq.search = e.target.value; const pos = e.target.selectionStart; renderMagic(); const i = root.querySelector('#mqSearch'); i.focus(); i.setSelectionRange(pos, pos); };
+    box.querySelector('#mqRarity').onchange = e => { mq.rarity = e.target.value; renderMagic(); };
+    box.querySelector('#mqSource').onchange = e => { mq.source = e.target.value; renderMagic(); };
+    box.querySelectorAll('[data-vmap]').forEach(b => b.onclick = () => { if (window.World && window.World.showOnMapByName) window.World.showOnMapByName(b.dataset.vmap); });
+  }
+
   function stop() { clearInterval(timer); root = null; }
   function reset() { const keep = { customItems: ms.customItems, hiddenItems: ms.hiddenItems || [], cityId: ms.cityId }; ms = { ...defaultMState(), ...keep }; saveM(); for (const k in live) live[k] = 0; }
+  // move the world one day forward (prices + travellers)
+  function endDay() {
+    ms.daysAdvanced++; for (const k in live) live[k] = 0; saveM();
+    if (window.Market.onDayEnd) window.Market.onDayEnd();
+  }
   function setCity(id) { ms.cityId = id || null; saveM(); }
   function reload() { ms = loadM(); for (const k in live) live[k] = 0; cache = null; }
   function useState(s, opts = {}) { ms = sanitize(s); readOnly = !!opts.readOnly; for (const k in live) live[k] = 0; cache = null; }
 
   window.addEventListener('resize', () => { if (root && root.querySelector('#mgrid')) { drawBig(); renderGrid(); } });
 
-  window.Market = { render, stop, reset, setCity, reload, useState, formatCoins, items: allItems, _state: () => ms };
+  window.Market = { render, stop, reset, setCity, endDay, reload, useState, formatCoins, items: allItems, _state: () => ms };
 })();

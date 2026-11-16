@@ -42,9 +42,10 @@
   // ---------- data ----------
   // ---------- your world: Frindeval (data lives in world-data.js) ----------
   function buildFrindeval() {
-    const W = window.FRINDEVAL;
-    const world = { version: 3, frindeval: 1, locations: [], factions: [], npcs: [], maps: [] };
-    if (!W) return world;
+    if (!window.FRINDEVAL) return { version: 3, frindeval: WORLD_VERSION, locations: [], factions: [], npcs: [], maps: [], roads: [], sim: { day: 0, log: [] } };
+    const W = JSON.parse(JSON.stringify(window.FRINDEVAL)); // copy, so the original data stays untouched
+    if (window.FRINDEVAL_GENERATE) window.FRINDEVAL_GENERATE(W, 10); // fill every place up to 10 people
+    const world = { version: 3, frindeval: WORLD_VERSION, locations: [], factions: [], npcs: [], maps: [], roads: [], sim: { day: 0, log: [] } };
     const id = {};
     world.maps = W.maps.map(m => ({ id: m.id, name: m.name, src: m.src, hidden: !!m.hidden, pins: {} }));
     world.locations = W.locations.map(l => {
@@ -62,7 +63,22 @@
       locationId: id['L:' + n.loc] || null, known: !!n.known, portrait: '',
       parents: (n.parents || []).map(k => id['N:' + k]).filter(Boolean), spouses: [], siblings: [], bonds: [],
       factions: (n.factions || []).map(([k, rank]) => ({ id: id['F:' + k], rank })).filter(f => f.id),
+      ...(n.generated ? { generated: true } : {}),
     }));
+    world.roads = (W.roads || []).map(([a, b, d]) => [id['L:' + a], id['L:' + b], d]).filter(r => r[0] && r[1]);
+    // travellers: some start at home, some already on the road
+    for (const [k, mv] of Object.entries(W.movers || {})) {
+      const n = world.npcs.find(x => x.id === id['N:' + k]);
+      const route = mv.route.map(x => id['L:' + x]).filter(Boolean);
+      if (!n || route.length < 2) continue;
+      if (n.locationId !== route[0]) route.unshift(n.locationId); // always start from home
+      n.travel = { kind: mv.kind, route: [...new Set(route)], stop: 0, stay: 1 + Math.floor(Math.random() * 3), road: null };
+      if (Math.random() < 0.3) {
+        const total = 1 + Math.floor(Math.random() * 3);
+        n.travel.road = { from: route[0], to: n.travel.route[1], left: 1 + Math.floor(Math.random() * total), total };
+        n.travel.stop = 1; n.locationId = null;
+      }
+    }
     const byKey = k => world.npcs.find(x => x.id === id['N:' + k]);
     W.npcs.forEach(n => {
       if (!n.spouse) return;
@@ -78,15 +94,17 @@
   }
   const sampleWorld = buildFrindeval;
 
-  // One-time switch from the old example world (Oakvale & the Ironfoots) to Frindeval.
-  // Anything YOU made yourself is kept.
+  // One-time upgrades of your saved world:
+  //  v1: remove the old example world (Oakvale & the Ironfoots)  ·  v2: Frindeval lore, the Sultanate, villagers, travellers.
+  // Everything YOU made or changed is kept: things are only ADDED when a place/person with that name doesn't exist yet.
   const OLD_EXAMPLE = {
     locations: ['Oakvale', 'The Prancing Griffin', 'Stonewatch Keep', 'Saltmere'],
     npcs: ['Old Durgan Ironfoot', 'Brom Ironfoot', 'Hilda Ironfoot', 'Torin Ironfoot', 'Mara Ironfoot', 'Elsa Brightwater', 'Lord Aldric Vex'],
     factions: ['The Iron Brotherhood', "The Queen's Eyes", 'Saltmere Trading Company'],
   };
+  const WORLD_VERSION = 2;
   let migratedToFrindeval = false;
-  function migrateToFrindeval(s) {
+  function removeOldExample(s) {
     const oldL = new Set(s.locations.filter(l => OLD_EXAMPLE.locations.includes(l.name)).map(l => l.id));
     const oldN = new Set(s.npcs.filter(n => OLD_EXAMPLE.npcs.includes(n.name)).map(n => n.id));
     const oldF = new Set(s.factions.filter(f => OLD_EXAMPLE.factions.includes(f.name)).map(f => f.id));
@@ -99,27 +117,57 @@
       n.bonds = n.bonds.filter(b => !oldN.has(b.id));
       n.factions = n.factions.filter(f => !oldF.has(f.id));
     });
-    const F = buildFrindeval();
-    // if you already made a place with the same name, keep yours and point Frindeval's NPCs at it
-    const same = {};
-    F.locations = F.locations.filter(l => {
-      const mine = s.locations.find(x => x.name.toLowerCase() === l.name.toLowerCase());
-      if (mine) {
-        same[l.id] = mine.id;
-        if (!mine.notes) Object.assign(mine, { notes: l.notes, region: mine.region || l.region, type: mine.type || l.type,
-          priceMod: l.priceMod, warExposure: l.warExposure });
-        return false;
-      }
-      return true;
+  }
+  function mergeWorld(s, F) {
+    const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+    const lmap = {}, fmap = {}, nmap = {};
+    F.locations.forEach(l => {
+      const mine = s.locations.find(x => same(x.name, l.name));
+      if (!mine) { s.locations.push(l); lmap[l.id] = l.id; return; }
+      lmap[l.id] = mine.id;
+      if (!mine.notes || /Not described yet/.test(mine.notes)) Object.assign(mine, { notes: l.notes, region: l.region, type: mine.type || l.type, priceMod: l.priceMod, warExposure: l.warExposure });
+      else if (/^The Dunes$/.test(mine.region || '')) mine.region = l.region;
     });
-    F.npcs.forEach(n => { if (same[n.locationId]) n.locationId = same[n.locationId]; });
-    F.factions.forEach(f => { if (same[f.hqId]) f.hqId = same[f.hqId]; });
-    F.maps.forEach(m => { for (const [lid, xy] of Object.entries(m.pins)) if (same[lid]) { m.pins[same[lid]] = xy; delete m.pins[lid]; } });
-    s.locations.push(...F.locations); s.factions.push(...F.factions); s.npcs.push(...F.npcs);
-    if (!s.maps || !s.maps.length) s.maps = F.maps;
-    s.frindeval = 1; s.version = 3;
+    F.factions.forEach(f => {
+      const mine = s.factions.find(x => same(x.name, f.name));
+      if (mine) { fmap[f.id] = mine.id; return; }
+      f.hqId = lmap[f.hqId] || null; s.factions.push(f); fmap[f.id] = f.id;
+    });
+    const remapTravel = t => t && ({ ...t, route: t.route.map(id => lmap[id]).filter(Boolean),
+      road: t.road ? { ...t.road, from: lmap[t.road.from], to: lmap[t.road.to] } : null });
+    const added = [];
+    F.npcs.forEach(n => {
+      const mine = s.npcs.find(x => same(x.name, n.name));
+      if (mine) { nmap[n.id] = mine.id; if (!mine.travel && n.travel) { mine.travel = remapTravel(n.travel); if (mine.travel.road) mine.travel.road = null; } return; }
+      nmap[n.id] = n.id; added.push(n);
+    });
+    const addedIds = new Set(added.map(n => n.id));
+    added.forEach(n => {
+      n.locationId = lmap[n.locationId] || null;
+      ['parents', 'spouses', 'siblings'].forEach(k => { n[k] = n[k].map(x => nmap[x]).filter(Boolean); });
+      n.bonds = n.bonds.map(b => ({ ...b, id: nmap[b.id] })).filter(b => b.id);
+      n.factions = n.factions.map(f => ({ ...f, id: fmap[f.id] })).filter(f => f.id);
+      if (n.travel) n.travel = remapTravel(n.travel);
+      s.npcs.push(n);
+    });
+    // links from new people to people you already had: add the other half (e.g. "Kamal is Halvar's ally")
+    added.forEach(n => {
+      n.spouses.forEach(x => { const o = s.npcs.find(p => p.id === x); if (o && !addedIds.has(o.id) && !o.spouses.includes(n.id)) o.spouses.push(n.id); });
+      n.bonds.forEach(b => { const o = s.npcs.find(p => p.id === b.id); if (o && !addedIds.has(o.id) && !o.bonds.some(x => x.id === n.id)) o.bonds.push({ id: n.id, type: BONDS[b.type], note: b.note }); });
+    });
+    s.maps = s.maps || [];
+    F.maps.forEach(fm => {
+      let mine = s.maps.find(m => m.id === fm.id);
+      if (!mine) { mine = { ...fm, pins: {} }; s.maps.push(mine); }
+      for (const [lid, xy] of Object.entries(fm.pins)) { const t = lmap[lid]; if (t && !mine.pins[t]) mine.pins[t] = xy; }
+    });
+    s.roads = Array.isArray(s.roads) ? s.roads : [];
+    F.roads.forEach(([a, b, d]) => {
+      const A = lmap[a], B = lmap[b];
+      if (A && B && !s.roads.some(r => (r[0] === A && r[1] === B) || (r[0] === B && r[1] === A))) s.roads.push([A, B, d]);
+    });
+    s.frindeval = WORLD_VERSION; s.version = 3;
     migratedToFrindeval = true;
-    return s;
   }
 
   const safeMapSrc = s => (typeof s === 'string' && /^maps\/[\w.-]+\.(jpg|jpeg|png|webp)$/.test(s)) ? s : safeImg(s);
@@ -147,7 +195,14 @@
       }
       return { id: String(m.id), name: String(m.name || 'Map'), src: safeMapSrc(m.src), hidden: m.hidden === true, pins };
     });
-    if (!s.frindeval) migrateToFrindeval(s);
+    s.roads = (Array.isArray(s.roads) ? s.roads : []).filter(r => Array.isArray(r) && r.length === 3 && r[2] > 0);
+    s.sim = s.sim && typeof s.sim === 'object' ? { day: Number(s.sim.day) || 0, log: Array.isArray(s.sim.log) ? s.sim.log.slice(0, 150) : [] } : { day: 0, log: [] };
+    s.npcs.forEach(n => {
+      const t = n.travel;
+      if (!t || !Array.isArray(t.route) || t.route.length < 2) { delete n.travel; return; }
+      if (t.road && !(t.road.from && t.road.to && t.road.left >= 0)) t.road = null;
+    });
+    if ((s.frindeval || 0) < WORLD_VERSION) { removeOldExample(s); mergeWorld(s, buildFrindeval()); }
     return s;
   }
   function load() {
@@ -294,7 +349,7 @@
   }
 
   // ---------- routing (tabs) ----------
-  const ui = { npcId: null, editing: false, search: '', locFilter: '', treeId: null, editLocId: null, editFacId: null, facId: null };
+  const ui = { who: '', routeDraft: [], npcId: null, editing: false, search: '', locFilter: '', treeId: null, editLocId: null, editFacId: null, facId: null };
   function route() {
     const tab = (location.hash || '#npcs').slice(1).split('/')[0];
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
@@ -321,6 +376,8 @@
           </div>
           <div class="stack" style="margin-top:12px">
             <input id="npcSearch" placeholder="🔍 Search name, job, race…" value="${esc(ui.search)}">
+            <select id="npcWho">${[['', '👥 Everyone'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now']]
+              .map(([v, l]) => `<option value="${v}" ${ui.who === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
             <select id="npcLoc"><option value="">📍 All locations</option><option value="__none" ${ui.locFilter === '__none' ? 'selected' : ''}>Unknown / wandering</option>
               ${[...state.locations].sort(byName).map(l => `<option value="${l.id}" ${ui.locFilter === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select>
           </div>
@@ -333,6 +390,7 @@
     $('#aiNpc').onclick = () => { ui.npcId = null; ui.editing = false; ui.draft = null; renderNpcList(); renderAiPanel(); };
     $('#npcSearch').oninput = e => { ui.search = e.target.value; renderNpcList(); };
     $('#npcLoc').onchange = e => { ui.locFilter = e.target.value; renderNpcList(); };
+    $('#npcWho').onchange = e => { ui.who = e.target.value; renderNpcList(); };
     renderNpcList(); renderNpcDetail();
   }
 
@@ -340,12 +398,13 @@
     const q = ui.search.trim().toLowerCase();
     const list = state.npcs.filter(n =>
       (!q || [n.name, n.occupation, n.race].some(v => (v || '').toLowerCase().includes(q))) &&
-      (!ui.locFilter || (ui.locFilter === '__none' ? !loc(n.locationId) : n.locationId === ui.locFilter))
+      (!ui.locFilter || (ui.locFilter === '__none' ? !loc(n.locationId) : n.locationId === ui.locFilter)) &&
+      (!ui.who || (ui.who === 'main' ? !n.generated : ui.who === 'villagers' ? n.generated : ui.who === 'travel' ? !!n.travel : !!(n.travel && n.travel.road)))
     ).sort(byName);
     $('#npcList').innerHTML = list.length ? list.map(n => `
       <li data-id="${n.id}" class="li-flex ${n.id === ui.npcId ? 'sel' : ''}">${avatar(n)}<div>
         <div>${esc(n.name)} ${n.status !== 'Alive' ? `<span class="badge ${n.status === 'Dead' ? 'dead' : 'missing'}">${esc(n.status)}</span>` : ''}</div>
-        <div class="sub">${esc([n.race, n.occupation].filter(Boolean).join(' · '))} ${loc(n.locationId) ? '· 📍 ' + esc(loc(n.locationId).name) : ''}</div>
+        <div class="sub">${esc([n.race, n.occupation].filter(Boolean).join(' · '))} ${n.travel && n.travel.road && loc(n.travel.road.to) ? '· 🐎 → ' + esc(loc(n.travel.road.to).name) : loc(n.locationId) ? '· 📍 ' + esc(loc(n.locationId).name) : ''}</div>
       </div></li>`).join('') : '<li class="muted" style="cursor:default">No NPCs found.</li>';
     document.querySelectorAll('#npcList li[data-id]').forEach(li => li.onclick = () => {
       ui.npcId = li.dataset.id; ui.editing = false; renderNpcList(); renderNpcDetail();
@@ -444,7 +503,12 @@
             <button class="btn primary" id="joinFac" style="flex:0">+ Join</button>
           </div>` : '<p class="muted small">Make factions in the ⚜️ Factions tab.</p>'}
         </div>
+        <div>
+          <h3>🧭 Travel</h3>
+          ${travelHtml(n)}
+        </div>
       </div>`;
+    wireTravel(n);
     $('#printPlayer').onclick = () => printNpcs([n], false);
     $('#toggleKnown').onclick = () => { n.known = !n.known; save(); toast(n.known ? '👁 Players can now see this NPC (no secrets).' : '🙈 Hidden from the player view.'); renderNpcDetail(); };
     $('#printDm').onclick = () => printNpcs([n], true);
@@ -576,7 +640,10 @@
             <div class="small muted">${esc(L.type || '')}${L.region ? ' · ' + esc(L.region) : ''}</div>
             ${L.notes ? `<p class="small prewrap">${esc(L.notes)}</p>` : ''}
             <div class="small" style="margin-top:6px"><b>${people.length}</b> NPC${people.length === 1 ? '' : 's'} here:</div>
-            <ul>${people.map(p => `<li><a href="#" data-goto="${p.id}">${esc(p.name)}</a> <span class="muted small">${esc(p.occupation || '')}</span></li>`).join('') || '<li class="muted small">nobody yet</li>'}</ul>
+            <ul>${people.slice(0, 8).map(p => `<li><a href="#" data-goto="${p.id}">${esc(p.name)}</a> <span class="muted small">${esc(p.occupation || '')}</span></li>`).join('') || '<li class="muted small">nobody yet</li>'}
+              ${people.length > 8 ? `<li><a href="#" data-allat="${L.id}">…and ${people.length - 8} more</a></li>` : ''}</ul>
+            ${(() => { const coming = state.npcs.filter(p => p.travel && p.travel.road && p.travel.road.to === L.id);
+              return coming.length ? `<div class="small muted">🐎 On the way here: ${coming.map(p => `${esc(p.name)} (${p.travel.road.left} d)`).join(', ')}</div>` : ''; })()}
             ${L.hidden ? '<span class="badge missing">🙈 secret place</span>' : ''}
             <div class="small muted">💰 ${esc(labelOf(PRICE_LEVELS, L.priceMod))} prices · ⚔️ ${esc(labelOf(EXPOSURE, L.warExposure))}</div>
             <div class="row" style="margin-top:8px">
@@ -616,6 +683,7 @@
     app.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
     app.querySelectorAll('[data-prices]').forEach(b => b.onclick = () => { window.Market.setCity(b.dataset.prices); go('market'); });
     app.querySelectorAll('[data-showmap]').forEach(b => b.onclick = () => showOnMap(b.dataset.showmap));
+    app.querySelectorAll('[data-allat]').forEach(a => a.onclick = e => { e.preventDefault(); ui.locFilter = a.dataset.allat; ui.who = ''; ui.search = ''; ui.npcId = null; go('npcs'); });
     app.querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
       const people = state.npcs.filter(n => n.locationId === b.dataset.print).sort(byName);
       printNpcs(people, confirm('Include secret DM notes?\n\nOK = DM copy (with secrets)\nCancel = player copy'));
@@ -710,6 +778,100 @@
     if (ui.facId) { const el = document.getElementById('fac-' + ui.facId); if (el) el.scrollIntoView({ block: 'center' }); }
   }
 
+  // ================= TRAVEL SIMULATION =================
+  // Traders, nobles and couriers walk their route one day at a time. Each "🌙 End the day" moves everyone.
+  const KIND_LABEL = { trader: '🐎 Trader', noble: '👑 Noble', courier: '🦅 Courier' };
+  const stayFor = kind => kind === 'courier' ? 1 + Math.floor(Math.random() * 2) : kind === 'noble' ? 2 + Math.floor(Math.random() * 4) : 1 + Math.floor(Math.random() * 3);
+  function travelDays(a, b) { // shortest road trip in days (Dijkstra); 3 days if no road is known
+    if (a === b) return 0;
+    const g = {};
+    state.roads.forEach(([x, y, d]) => { (g[x] = g[x] || []).push([y, d]); (g[y] = g[y] || []).push([x, d]); });
+    const dist = { [a]: 0 }, todo = [a], done = new Set();
+    while (todo.length) {
+      todo.sort((p, q) => dist[p] - dist[q]);
+      const k = todo.shift(); if (done.has(k)) continue; done.add(k);
+      if (k === b) return dist[k];
+      for (const [n, d] of g[k] || []) if (dist[n] === undefined || dist[k] + d < dist[n]) { dist[n] = dist[k] + d; todo.push(n); }
+    }
+    return 3;
+  }
+  function simulateDay() {
+    state.sim.day++;
+    const day = state.sim.day, events = [];
+    state.npcs.forEach(n => {
+      const t = n.travel; if (!t) return;
+      t.route = t.route.filter(id => loc(id));
+      if (t.route.length < 2) { delete n.travel; return; }
+      if (n.status === 'Dead' || n.status === 'Missing') return;
+      if (t.road) {
+        t.road.left--;
+        if (t.road.left <= 0) {
+          n.locationId = loc(t.road.to) ? t.road.to : t.route[0];
+          events.push({ day, id: n.id, text: `${n.name} arrived in ${loc(n.locationId).name}` });
+          t.road = null; t.stay = stayFor(t.kind);
+        }
+      } else {
+        t.stay = (t.stay || 1) - 1;
+        if (t.stay <= 0) {
+          const cur = t.route.indexOf(n.locationId);
+          const from = cur >= 0 ? t.route[cur] : (n.locationId || t.route[t.stop || 0]);
+          const next = ((cur >= 0 ? cur : (t.stop || 0)) + 1) % t.route.length;
+          const to = t.route[next], d = Math.max(1, travelDays(from, to));
+          t.stop = next; t.road = { from, to, left: d, total: d }; n.locationId = null;
+          events.push({ day, id: n.id, text: `${n.name} left ${loc(from) ? loc(from).name : '?'} for ${loc(to).name} (${d} day${d === 1 ? '' : 's'})` });
+        }
+      }
+    });
+    state.sim.log = [...events.reverse(), ...state.sim.log].slice(0, 150);
+    save();
+    return events;
+  }
+  function travelHtml(n) {
+    const t = n.travel;
+    if (t) {
+      const status = t.road
+        ? `On the road from <b>${esc(loc(t.road.from) ? loc(t.road.from).name : '?')}</b> to <b>${esc(loc(t.road.to) ? loc(t.road.to).name : '?')}</b> — arrives in ${t.road.left} day${t.road.left === 1 ? '' : 's'}.`
+        : `Staying in <b>${esc(loc(n.locationId) ? loc(n.locationId).name : '?')}</b> — leaves in ${t.stay || 1} day${(t.stay || 1) === 1 ? '' : 's'}.`;
+      return `<div class="field-view small">${KIND_LABEL[t.kind] || '🐎 Traveller'} · ${status}
+        <div style="margin-top:6px">Route: ${t.route.map(id => esc(loc(id) ? loc(id).name : '?')).join(' → ')} → (back)</div></div>
+        <div class="row" style="margin-top:8px;justify-content:flex-start"><button class="btn small danger" id="stopTravel" style="flex:0">🏠 Stop travelling (stay here)</button></div>`;
+    }
+    const d = ui.routeDraft.filter(id => loc(id));
+    return `<p class="small muted" style="margin:0 0 6px">Stays at home. Make them travel between places (moves each time you press 🌙 End the day):</p>
+      <div class="rel-group">${d.map((id, i) => `<span class="chip">${i + 1}. ${esc(loc(id).name)} <button class="btn-x" data-unstop="${i}">×</button></span>`).join('') || ''}</div>
+      <div class="row">
+        <select id="routeStop" style="flex:2 1 160px"><option value="">Add a stop…</option>${[...state.locations].sort(byName).map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select>
+        <select id="routeKind" style="flex:1 1 110px"><option value="trader">🐎 Trader</option><option value="noble">👑 Noble</option><option value="courier">🦅 Courier</option></select>
+        <button class="btn primary" id="startTravel" style="flex:0" ${d.length ? '' : 'disabled'}>Start</button>
+      </div>`;
+  }
+  function wireTravel(n) {
+    const st = $('#stopTravel');
+    if (st) st.onclick = () => {
+      if (n.travel && n.travel.road) n.locationId = n.travel.road.to;
+      delete n.travel; save(); toast(`${n.name} settles down.`); renderNpcList(); renderNpcDetail();
+    };
+    const rs = $('#routeStop'); if (rs) rs.onchange = () => { if (rs.value) { ui.routeDraft.push(rs.value); renderNpcDetail(); } };
+    document.querySelectorAll('[data-unstop]').forEach(b => b.onclick = () => { ui.routeDraft.splice(+b.dataset.unstop, 1); renderNpcDetail(); });
+    const go2 = $('#startTravel');
+    if (go2) go2.onclick = () => {
+      const route = [...new Set([n.locationId, ...ui.routeDraft].filter(id => loc(id)))];
+      if (route.length < 2) return toast('Pick at least one other place (and give them a home location).');
+      n.travel = { kind: $('#routeKind').value, route, stop: 0, stay: 1, road: null };
+      ui.routeDraft = []; save(); toast(`🐎 ${n.name} will set off at the end of the day.`); renderNpcList(); renderNpcDetail();
+    };
+  }
+  function travelPanel() {
+    const onRoad = state.npcs.filter(p => p.travel && p.travel.road);
+    return `<div class="split" style="grid-template-columns:1fr 1fr;margin-top:12px">
+      <div class="field-view"><div class="row" style="justify-content:space-between"><b>🛤 On the road (${onRoad.length})</b>
+        <button class="btn small primary" id="simDay" style="flex:0">🌙 End the day</button></div>
+        <ul class="members small travel-list">${onRoad.map(p => `<li><a href="#" data-tgoto="${p.id}">${esc(p.name)}</a> <span class="muted">${esc(loc(p.travel.road.from) ? loc(p.travel.road.from).name : '?')} → ${esc(loc(p.travel.road.to) ? loc(p.travel.road.to).name : '?')} · ${p.travel.road.left} d</span></li>`).join('') || '<li class="muted">Nobody is travelling right now.</li>'}</ul></div>
+      <div class="field-view"><b>📜 Travel log</b> <span class="small muted">· world day ${state.sim.day}</span>
+        <ul class="members small travel-list">${state.sim.log.slice(0, 30).map(e => `<li><span class="muted">Day ${e.day}:</span>&nbsp;${esc(e.text)}</li>`).join('') || '<li class="muted">Press 🌙 End the day to move the world forward.</li>'}</ul></div>
+    </div>`;
+  }
+
   // ================= MAPS =================
   // Each map is a picture. A pin puts one of your locations at "x% from the left, y% from the top".
   function readMapImage(file) {
@@ -751,10 +913,15 @@
           <img src="${esc(m.src)}" alt="${esc(m.name)}" id="mapImg" draggable="false" class="${ui.pinLoc ? 'placing' : ''}">
           ${Object.entries(m.pins).filter(([lid]) => loc(lid)).map(([lid, [x, y]]) => {
             const L = loc(lid), n = state.npcs.filter(p => p.locationId === lid).length;
-            return `<button class="pin ${L.hidden ? 'secret' : ''} ${ui.pinSel === lid ? 'sel' : ''}" data-pin="${lid}" style="left:${x}%;top:${y}%" title="${esc(L.name)}${n ? ` — ${n} NPC${n === 1 ? '' : 's'}` : ''}">${n ? `<span>${n}</span>` : ''}</button>`;
+            return `<button class="pin ${L.type === 'Dungeon' ? 'dungeon' : L.hidden ? 'secret' : ''} ${ui.pinSel === lid ? 'sel' : ''}" data-pin="${lid}" style="left:${x}%;top:${y}%" title="${esc(L.name)}${n ? ` — ${n} NPC${n === 1 ? '' : 's'}` : ''}">${n ? `<span>${n}</span>` : ''}</button>`;
+          }).join('')}
+          ${state.npcs.filter(p => p.travel && p.travel.road && m.pins[p.travel.road.from] && m.pins[p.travel.road.to]).map(p => {
+            const r = p.travel.road, [x1, y1] = m.pins[r.from], [x2, y2] = m.pins[r.to], f = Math.min(0.9, Math.max(0.1, (r.total - r.left + 0.5) / r.total));
+            return `<button class="traveller ${p.generated ? '' : 'main'}" data-traveller="${p.id}" style="left:${x1 + (x2 - x1) * f}%;top:${y1 + (y2 - y1) * f}%" title="${esc(p.name)} → ${esc(loc(r.to).name)} (${r.left} d)">${p.travel.kind === 'noble' ? '👑' : p.travel.kind === 'courier' ? '🦅' : '🐎'}</button>`;
           }).join('')}
         </div></div>
         <div id="pinCard"></div>
+        ${travelPanel()}
         <div class="row" style="margin-top:10px;justify-content:flex-start">
           <button class="btn small" id="mapHide" style="flex:0">${m.hidden ? '🙈 Hidden from players — show' : '👁 Players can see this map — hide'}</button>
           <button class="btn small" id="mapRename" style="flex:0">✏️ Rename</button>
@@ -789,6 +956,9 @@
       state.maps = state.maps.filter(x => x !== m); ui.mapId = null; save(); renderMaps(app);
     };
     renderPinCard(m);
+    app.querySelectorAll('[data-traveller]').forEach(b => b.onclick = e => { e.stopPropagation(); ui.npcId = b.dataset.traveller; ui.editing = false; go('npcs'); });
+    const ed = $('#simDay'); if (ed) ed.onclick = () => { window.Market.endDay(); renderMaps(app); };
+    app.querySelectorAll('[data-tgoto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.tgoto; ui.editing = false; go('npcs'); });
     const sel = app.querySelector('.pin.sel'); if (sel && ui.mapZoom > 100) sel.scrollIntoView({ block: 'center', inline: 'center' });
   }
   function renderPinCard(m) {
@@ -971,7 +1141,7 @@
       } catch (err) { toast("⚠️ That file doesn't look like a World Keeper backup."); }
     };
     $('#sampleBtn').onclick = () => { if (confirm('Replace EVERYTHING with the starting Frindeval world? Your own changes will be lost.')) { state = sampleWorld(); save(); ui.npcId = ui.treeId = null; toast('Frindeval loaded.'); renderSettings(app); } };
-    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 3, frindeval: 1, npcs: [], locations: [], factions: [], maps: state.maps.map(m => ({ ...m, pins: {} })) }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
+    $('#clearBtn').onclick = () => { if (confirm('Delete ALL NPCs and locations? (Download a backup first!)')) { state = { version: 3, frindeval: WORLD_VERSION, npcs: [], locations: [], factions: [], roads: [], sim: { day: 0, log: [] }, maps: state.maps.map(m => ({ ...m, pins: {} })) }; save(); ui.npcId = ui.treeId = null; toast('Fresh, empty world.'); renderSettings(app); } };
     $('#marketReset').onclick = () => { if (confirm('Reset the market back to "war started 14 days ago"?')) { window.Market.reset(); toast('Market reset.'); } };
     renderCloudPanel();
   }
@@ -1197,6 +1367,7 @@
     return {
       version: 1,
       npcs: known.map(n => ({
+        travelTo: n.travel && n.travel.road && lid.has(n.travel.road.to) ? n.travel.road.to : null,
         id: n.id, name: n.name, race: n.race, gender: n.gender, age: n.age, occupation: n.occupation, status: n.status,
         description: n.description, portrait: n.portrait, locationId: lid.has(n.locationId) ? n.locationId : null,
         parents: n.parents.filter(x => kid.has(x)), spouses: n.spouses.filter(x => kid.has(x)), siblings: n.siblings.filter(x => kid.has(x)),
@@ -1210,6 +1381,7 @@
     };
   }
   window.World.buildPlayerData = buildPlayerData;
+  window.World.showOnMapByName = name => { const L = state.locations.find(l => l.name === name); if (!L || !showOnMap(L.id)) toast('That place has no pin on any map.'); };
 
   // A newer world arrived from the cloud (e.g. you edited on your phone)
   function applyRemote(data) {
@@ -1226,6 +1398,12 @@
 
   route();
   window.Market.onChange = () => { if (window.Cloud) window.Cloud.changed(); };
+  // every "🌙 End the day" in the market also moves the travellers
+  window.Market.onDayEnd = () => {
+    const ev = simulateDay();
+    const arrived = ev.filter(e => e.text.includes(' arrived in ')).length;
+    if (ev.length) toast(`🐎 ${ev.length - arrived} set off, ${arrived} arrived. See 🗺 Maps for the travel log.`);
+  };
   if (window.Cloud) {
     window.Cloud.onStatus(renderSync);
     window.Cloud.init({ getPayload: () => ({ data: { ...state, market: window.Market._state() }, player: buildPlayerData() }), applyRemote })
