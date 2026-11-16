@@ -57,6 +57,12 @@
 - You see every player addition in **🧙 NPCs → 📝 From players**, with suggestions (including your secret NPCs, which players never see). Link it, or press **➕ Add as new NPC**.
 - Maps show **no pins and no place names** from the app. Your map pictures have names painted in — in **🗺 Maps**, use **🎭 Add player version (no names)** to upload a version without labels (Inkarnate can export without text). Players then see that one.
 
+## 📲 Phone app & notifications (already set up)
+- Everyone can press **📲 App** at the top to see how to put Frindeval on their home screen (iPhone: Safari → Share → Add to Home Screen; Android: Chrome → ⋮ → Install app).
+- Players press **🔔** (next to "+ Add an NPC you met") to switch on notifications. **On iPhone this only works after adding the app to the home screen and opening it from there** (Apple's rule, iOS 16.4 or newer).
+- When you share new NPCs or maps, players' phones get a notification automatically. You can also send your own message in **☁️ Cloud & Backup → 📣 Message your players**.
+- Behind the scenes: the `notify-players` Edge Function and the secrets `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` in Supabase (already installed).
+
 ## Step 7 (optional): the AI helper 🤖
 1. Get a Claude API key at **console.anthropic.com** (add a little credit, e.g. $5; set a monthly limit under **Limits**).
 2. Supabase → Edge Functions → new function named **`generate-npc`** → paste `supabase/functions/generate-npc/index.ts` → Deploy.

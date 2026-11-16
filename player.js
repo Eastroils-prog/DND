@@ -59,6 +59,7 @@
     const lo = $('#logoutBtn'); lo.hidden = false; lo.onclick = async () => { await C.signOut(); location.reload(); };
     document.body.classList.remove('locked');
     await load();
+    if (window.PWA) { window.PWA.addButton(() => ({ owner: me.isAdmin ? null : world.owner })); window.PWA.maybeHint(() => ({ owner: me.isAdmin ? null : world.owner })); }
     setInterval(load, 60000); // check for news every minute
     window.addEventListener('hashchange', route);
   }
@@ -116,7 +117,7 @@
       <div class="panel" style="margin-bottom:14px">
         <div class="row">
           <input id="q" placeholder="🔍 Search people…" value="${esc(ui.search)}" style="flex:3 1 200px">
-          ${me.isAdmin ? '<span class="small muted" style="flex:2 1 200px">👑 You are the DM: this is exactly what players see.</span>' : '<button class="btn primary" id="addBtn" style="flex:0">+ Add an NPC you met</button>'}
+          ${me.isAdmin ? '<span class="small muted" style="flex:2 1 200px">👑 You are the DM: this is exactly what players see.</span>' : '<button class="btn primary" id="addBtn" style="flex:0">+ Add an NPC you met</button><button class="btn" id="bellBtn" style="flex:0" title="Notifications">🔔</button>'}
         </div>
         <div id="addBox"></div>
       </div>
@@ -127,6 +128,7 @@
       </div>`;
     $('#q').oninput = e => { ui.search = e.target.value; const pos = e.target.selectionStart; renderPeople(); const i = $('#q'); i.focus(); i.setSelectionRange(pos, pos); };
     const ab = $('#addBtn'); if (ab) ab.onclick = () => { ui.adding = true; renderAddForm(); };
+    const bb = $('#bellBtn'); if (bb) bb.onclick = () => window.PWA && window.PWA.openGuide({ owner: world.owner });
     if (ui.adding) renderAddForm();
     wireNotes(app);
   }

@@ -2,14 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>World Keeper — NPCs & Market</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e15">
+  <title>Frindeval — World Keeper</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon-64.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Frindeval">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <!-- If anything breaks, show a red bar with the error so it can be sent to Claude -->
   <script>
-    window.APP_VERSION = '8';
+    window.APP_VERSION = '9';
     window.showAppError = function (msg) {
       var b = document.getElementById('appError');
       if (!b) { b = document.createElement('div'); b.id = 'appError'; b.className = 'app-error'; document.body.prepend(b); }
@@ -20,16 +28,16 @@
   </script>
 
   <header class="topbar">
-    <div class="brand">🐉 World Keeper <span class="ver">v8</span></div>
+    <div class="brand"><img class="brand-ico" src="icons/favicon-64.png" alt="">World Keeper <span class="ver">v9</span></div>
     <nav class="tabs" id="tabs">
-      <a href="#npcs" data-tab="npcs">🧙 NPCs</a>
-      <a href="#locations" data-tab="locations">🏰 Locations</a>
-      <a href="#factions" data-tab="factions">⚜️ Factions</a>
-      <a href="#maps" data-tab="maps">🗺 Maps</a>
-      <a href="#bestiary" data-tab="bestiary">🐉 Bestiary</a>
-      <a href="#tree" data-tab="tree">🌳 Family Tree</a>
-      <a href="#market" data-tab="market">💰 Market</a>
-      <a href="#cloud" data-tab="cloud">☁️ Cloud & Backup</a>
+      <a href="#npcs" data-tab="npcs"><span class="ti">🧙</span><span class="tl">NPCs</span></a>
+      <a href="#locations" data-tab="locations"><span class="ti">🏰</span><span class="tl">Locations</span></a>
+      <a href="#factions" data-tab="factions"><span class="ti">⚜️</span><span class="tl">Factions</span></a>
+      <a href="#maps" data-tab="maps"><span class="ti">🗺</span><span class="tl">Maps</span></a>
+      <a href="#bestiary" data-tab="bestiary"><span class="ti">🐉</span><span class="tl">Bestiary</span></a>
+      <a href="#tree" data-tab="tree"><span class="ti">🌳</span><span class="tl">Family Tree</span></a>
+      <a href="#market" data-tab="market"><span class="ti">💰</span><span class="tl">Market</span></a>
+      <a href="#cloud" data-tab="cloud"><span class="ti">☁️</span><span class="tl">Cloud & Backup</span></a>
     </nav>
     <a href="#cloud" id="syncStatus" class="sync" hidden></a>
   </header>
@@ -39,14 +47,15 @@
 
   <!-- Supabase = the cloud database + login. If it can't load (offline), the app still works locally. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
-  <script src="config.js?v=8"></script>
-  <script src="cloud.js?v=8"></script>
-  <script src="similar.js?v=8"></script>
-  <script src="magic-items.js?v=8"></script>
-  <script src="market.js?v=8"></script>
-  <script src="world-data.js?v=8"></script>
-  <script src="world-gen.js?v=8"></script>
-  <script src="bestiary.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="config.js?v=9"></script>
+  <script src="cloud.js?v=9"></script>
+  <script src="pwa.js?v=9"></script>
+  <script src="similar.js?v=9"></script>
+  <script src="magic-items.js?v=9"></script>
+  <script src="market.js?v=9"></script>
+  <script src="world-data.js?v=9"></script>
+  <script src="world-gen.js?v=9"></script>
+  <script src="bestiary.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
