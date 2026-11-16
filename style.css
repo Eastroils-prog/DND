@@ -180,3 +180,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold-dim); 
 .sync[hidden] { display: none; }
 #updated { margin-left: auto; }
 .loc-card.sel { box-shadow: 0 0 0 2px var(--gold); }
+.timepick { margin: 10px 0 4px; gap: 6px; font-size: .9rem; color: var(--muted); }
+.timepick > * { flex: 0 1 auto; }
+.timepick input { width: 70px; padding: 5px 8px; }
+.timepick select { width: auto; padding: 5px 8px; }
+@media (hover: none) { .hide-touch { display: none; } }

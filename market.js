@@ -56,8 +56,10 @@
     { id: 'lamp-oil', name: 'Lamp oil', unit: 'per flask', cat: 'Goods & Mounts', base: 10, war: 1.6, lag: 5, vol: 0.018, season: 0.1, phase: 3.1 },
     { id: 'cloth', name: 'Cloth, common', unit: 'per yard', cat: 'Goods & Mounts', base: 10, war: 1.3, lag: 9, vol: 0.012 },
   ];
-  const allItems = () => ITEMS.concat(ms.customItems || []);
-  const cats = () => ['All', ...new Set(allItems().map(i => i.cat))];
+  const allItems = () => ITEMS.concat(ms.customItems || []);           // every item (history is made for all of them)
+  const isHidden = id => (ms.hiddenItems || []).includes(id);
+  const visibleItems = () => allItems().filter(i => !isHidden(i.id));   // what the market shows (deleted items left out)
+  const cats = () => ['All', ...new Set(visibleItems().map(i => i.cat))];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // choices for the "add your own item" form
   const WAR_CHOICES = [[0.7, 'Gets much cheaper'], [0.85, 'Gets a bit cheaper'], [1, 'No change'], [1.3, 'A bit more expensive'],
@@ -104,6 +106,7 @@
       daysAdvanced: 0,
       events: [{ day: HISTORY_DAYS - 1 - WAR_DAYS_AGO, level: 1 }],
       customItems: [],
+      hiddenItems: [],   // built-in items you deleted (they can be restored)
       cityId: null,
     };
   }
@@ -127,6 +130,7 @@
       seed: Number(s.seed) || 1337, daysAdvanced: Math.max(0, Math.min(5000, Number(s.daysAdvanced) || 0)),
       events: s.events.filter(e => e && Number.isFinite(e.day) && Number.isFinite(e.level)),
       customItems: (Array.isArray(s.customItems) ? s.customItems : []).filter(i => i && i.id && i.base > 0 && i.war > 0),
+      hiddenItems: (Array.isArray(s.hiddenItems) ? s.hiddenItems : []).filter(id => ITEMS.some(i => i.id === id)),
       cityId: s.cityId || null,
     };
   }
@@ -221,7 +225,7 @@
     ctx.lineWidth = 1.5; ctx.stroke();
   }
 
-  function drawChart(cv, data, startDay, hover) {
+  function drawChart(cv, data, startDay, hover, sel) {
     const { ctx, w, h } = setupCanvas(cv);
     if (!w || !h) return null;
     const pad = { l: 70, r: 14, t: 14, b: 28 };
@@ -245,8 +249,15 @@
     const ticks = 6;
     for (let k = 0; k <= ticks; k++) {
       const i = Math.round((n - 1) * k / ticks), ago = t - (startDay + i);
-      const lbl = ago === 0 ? 'Today' : ago >= 60 ? `${Math.round(ago / 30.4)} mo ago` : `${ago} d ago`;
-      ctx.fillText(lbl, X(i), h - pad.b + 8);
+      // zoomed in (under ~5 months shown) -> label in days, so labels don't repeat
+      const lbl = ago === 0 ? 'Today' : (ago >= 60 && n > 150) ? `${Math.round(ago / 30.4)} mo ago` : `${ago} d ago`;
+      ctx.textAlign = k === 0 ? 'left' : k === ticks ? 'right' : 'center';
+      ctx.fillText(lbl, k === 0 ? X(i) - 4 : X(i), h - pad.b + 8);
+    }
+    // the stretch you are dragging across (to zoom in)
+    if (sel && sel.a !== sel.b) {
+      const x1 = X(Math.min(sel.a, sel.b)), x2 = X(Math.max(sel.a, sel.b));
+      ctx.fillStyle = 'rgba(224,179,84,0.18)'; ctx.fillRect(x1, pad.t, x2 - x1, h - pad.t - pad.b);
     }
     // war shading + markers
     for (const ev of ms.events) {
@@ -323,12 +334,36 @@
   }
 
   // ---------- page rendering ----------
-  let root = null, selected = 'potion-healing', range = 730, cat = 'All', hoverIdx = null, layout = null;
+  let root = null, selected = 'potion-healing', cat = 'All', hoverIdx = null, layout = null, drag = null;
+  // The time window of the big chart, counted in "days ago": from 730 days ago up to 0 (= today)
+  let view = { from: 730, to: 0 };
+  const UNITS = [[1, 'days'], [7, 'weeks'], [30.4, 'months'], [365, 'years']];
 
+  function clampView() {
+    const t = today();
+    view.from = Math.max(1, Math.min(Math.round(view.from), t));
+    view.to = Math.max(0, Math.min(Math.round(view.to), view.from - 1));
+  }
   function seriesFor(id) {
-    const all = cache[id].slice(); all[today()] = livePrice(id);
-    const start = Math.max(0, all.length - range);
-    return { data: all.slice(start), start };
+    clampView();
+    const all = cache[id].slice(), t = today(); all[t] = livePrice(id);
+    const start = t - view.from, end = t - view.to;
+    return { data: all.slice(start, end + 1), start };
+  }
+  // 45 -> "45 days", 90 -> "3 months", 0 -> "today"
+  function agoText(d) {
+    if (d === 0) return 'today';
+    const nearYears = d >= 360 && Math.abs(d / 365 - Math.round(d / 365)) < 0.01;
+    const [u, name] = nearYears ? UNITS[3] : d >= 60 ? UNITS[2] : d % 7 === 0 && d >= 14 ? UNITS[1] : UNITS[0];
+    const v = Math.round((d / u) * 10) / 10;
+    return `${v} ${v === 1 ? name.slice(0, -1) : name} ago`;
+  }
+  function bestUnit(d) {
+    if (d === 0) return [0, 1];
+    if (d >= 360 && Math.abs(d / 365 - Math.round(d / 365)) < 0.01) return [Math.round(d / 365), 365];
+    if (d >= 60 && Math.abs(d / 30.4 - Math.round(d / 30.4)) < 0.05) return [Math.round(d / 30.4), 30.4];
+    if (d % 7 === 0 && d >= 14) return [d / 7, 7];
+    return [d, 1];
   }
 
   function render(container) {
@@ -389,7 +424,12 @@
             <div><label>What does the war do to it?</label><select name="war">${WAR_CHOICES.map(([v, l]) => `<option value="${v}" ${v === 1.3 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
             <div><label>How jumpy is the price?</label><select name="vol">${VOL_CHOICES.map(([v, l]) => `<option value="${v}" ${v === 0.016 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
             <button class="btn primary" type="submit">+ Add to market</button>
-          </form>`}
+          </form>
+          ${(ms.hiddenItems || []).length ? `<hr style="border-color:var(--line);margin:16px 0">
+          <h3>🗑 Deleted items (${ms.hiddenItems.length})</h3>
+          <ul class="members">${ms.hiddenItems.map(id => ITEMS.find(i => i.id === id)).filter(Boolean).map(i =>
+            `<li>${esc(i.name)} <span class="muted small">${esc(i.unit)}</span> <button class="btn small" data-restore="${i.id}" style="margin-left:auto">↩ Restore</button></li>`).join('')}</ul>
+          <button class="btn small" id="restoreAll">↩ Restore all</button>` : ''}`}
         </aside>
       </div>`;
     root.querySelector('#citySel').onchange = e => {
@@ -411,6 +451,11 @@
       saveM(); render(root);
       window.toast && window.toast('War status updated — prices will react over the coming days.');
     };
+    root.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => {
+      ms.hiddenItems = ms.hiddenItems.filter(id => id !== b.dataset.restore); selected = b.dataset.restore; saveM(); render(root);
+    });
+    const ra = root.querySelector('#restoreAll');
+    if (ra) ra.onclick = () => { ms.hiddenItems = []; saveM(); render(root); window.toast && window.toast('↩ All items are back.'); };
     root.querySelector('#itemForm').onsubmit = e => {
       e.preventDefault();
       const f = Object.fromEntries(new FormData(e.target).entries());
@@ -433,11 +478,20 @@
 
   function renderChartPanel() {
     const panel = root.querySelector('#chartPanel'); if (!panel) return;
-    if (!cache[selected]) selected = 'potion-healing';
-    const it = allItems().find(i => i.id === selected);
+    const vis = visibleItems();
+    if (!vis.length) {
+      panel.innerHTML = '<div class="empty">🧺 The market is empty. Add your own item, or restore deleted ones.</div>';
+      return;
+    }
+    if (!cache[selected] || isHidden(selected) || !vis.some(i => i.id === selected)) selected = vis[0].id;
+    const it = vis.find(i => i.id === selected);
     const all = cache[it.id], t = today(), now = livePrice(it.id), fw = firstWarDay();
     const prewar = fw !== null ? all[Math.max(0, fw - 1)] : all[Math.max(0, t - 14)];
-    const hist = all.slice(Math.max(0, t - 729), t);
+    clampView();
+    const shown = seriesFor(it.id).data;
+    const [fN, fU] = bestUnit(view.from), [tN, tU] = bestUnit(view.to);
+    const unitOpts = cur => UNITS.map(([u, l]) => `<option value="${u}" ${u === cur ? 'selected' : ''}>${l}</option>`).join('');
+    const presets = [[7, '1W'], [14, '2W'], [30, '1M'], [91, '3M'], [182, '6M'], [365, '1Y'], [730, '2Y'], [t, 'All']];
     panel.innerHTML = `
       <div class="chart-head">
         <div>
@@ -446,44 +500,80 @@
           <div class="small">${pctHtml(pct(now, all[t - 1]))} today · ${pctHtml(pct(now, prewar))} since the war began</div>
         </div>
         <div class="row" style="flex:0 1 auto">
-          ${[[14, '2W'], [30, '1M'], [90, '3M'], [180, '6M'], [365, '1Y'], [730, '2Y']].map(([d, l]) =>
-            `<button class="btn small ${range === d ? 'on' : ''}" data-range="${d}">${l}</button>`).join('')}
+          ${(() => { const hit = view.to === 0 ? presets.findIndex(([d]) => Math.min(d, t) === view.from) : -1;
+            return presets.map(([d, l], k) => `<button class="btn small ${k === hit ? 'on' : ''}" data-range="${d}">${l}</button>`).join(''); })()}
         </div>
       </div>
+      <form class="row timepick" id="timePick" autocomplete="off">
+        <span>🕰 Show from</span>
+        <input type="number" name="fromN" min="0" step="any" value="${fN}" aria-label="from how long ago">
+        <select name="fromU" aria-label="unit">${unitOpts(fU)}</select>
+        <span>ago &nbsp;to</span>
+        <input type="number" name="toN" min="0" step="any" value="${tN}" aria-label="until how long ago">
+        <select name="toU" aria-label="unit">${unitOpts(tU)}</select>
+        <span>ago</span>
+        <button class="btn small primary" type="submit">Show</button>
+      </form>
+      <div class="small muted" id="viewLabel">Showing <b>${esc(agoText(view.from))}</b> → <b>${esc(agoText(view.to))}</b>
+        · <span class="hide-touch">tip: drag across the chart to zoom in</span>
+        ${view.to !== 0 || !presets.some(([d]) => Math.min(d, t) === view.from) ? ' · <button class="btn small" id="resetZoom" type="button">↺ Back to 2 years</button>' : ''}</div>
       <canvas class="chart-canvas" id="bigChart"></canvas>
       <div class="stats">
         <div class="stat"><div class="k">Normal price (rulebook)</div><div class="v">${formatCoins(it.base)}</div></div>
         <div class="stat"><div class="k">Before the war</div><div class="v">${formatCoins(prewar)}</div></div>
-        <div class="stat"><div class="k">2-year low</div><div class="v">${formatCoins(Math.min(...hist, now))}</div></div>
-        <div class="stat"><div class="k">2-year high</div><div class="v">${formatCoins(Math.max(...hist, now))}</div></div>
+        <div class="stat"><div class="k">Lowest in this period</div><div class="v">${formatCoins(Math.min(...shown))}</div></div>
+        <div class="stat"><div class="k">Highest in this period</div><div class="v">${formatCoins(Math.max(...shown))}</div></div>
         <div class="stat"><div class="k">A year ago</div><div class="v">${formatCoins(all[Math.max(0, t - 365)])}</div></div>
       </div>`;
-    panel.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { range = +b.dataset.range; renderChartPanel(); });
+    panel.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { view = { from: +b.dataset.range, to: 0 }; hoverIdx = null; renderChartPanel(); });
+    const rz = panel.querySelector('#resetZoom'); if (rz) rz.onclick = () => { view = { from: 730, to: 0 }; renderChartPanel(); };
+    panel.querySelector('#timePick').onsubmit = e => {
+      e.preventDefault();
+      const f = e.target;
+      const from = Math.round(parseFloat(f.fromN.value) * parseFloat(f.fromU.value));
+      const to = Math.round(parseFloat(f.toN.value || 0) * parseFloat(f.toU.value));
+      if (!(from >= 0) || !(to >= 0)) return window.toast && window.toast('Please type numbers.');
+      if (from <= to) return window.toast && window.toast('"From" must be further back in time than "to".');
+      if (from > t) window.toast && window.toast(`History only goes back ${agoText(t)}, so I showed all of it.`);
+      view = { from, to }; hoverIdx = null; renderChartPanel();
+    };
     const cv = panel.querySelector('#bigChart');
-    cv.onmousemove = ev => {
-      if (!layout) return;
+    const idxAt = ev => {
       const rect = cv.getBoundingClientRect(), x = ev.clientX - rect.left;
       const frac = (x - layout.pad.l) / (layout.w - layout.pad.l - layout.pad.r);
-      hoverIdx = Math.round(Math.max(0, Math.min(1, frac)) * (layout.n - 1));
+      return Math.round(Math.max(0, Math.min(1, frac)) * (layout.n - 1));
+    };
+    cv.onmousedown = ev => { if (!layout) return; ev.preventDefault(); drag = { a: idxAt(ev), b: idxAt(ev) }; };
+    cv.onmousemove = ev => {
+      if (!layout) return;
+      hoverIdx = idxAt(ev); if (drag) drag.b = hoverIdx;
       drawBig();
     };
-    cv.onmouseleave = () => { hoverIdx = null; drawBig(); };
+    cv.onmouseleave = () => { hoverIdx = null; drag = null; drawBig(); };
+    cv.onmouseup = () => {
+      if (!drag) return;
+      const a = Math.min(drag.a, drag.b), b = Math.max(drag.a, drag.b); drag = null;
+      if (b - a < 2) { drawBig(); return; }            // just a click, not a drag
+      const start = t - view.from;
+      view = { from: t - (start + a), to: t - (start + b) }; hoverIdx = null;
+      renderChartPanel();
+    };
     drawBig();
   }
   function drawBig() {
     const cv = root && root.querySelector('#bigChart'); if (!cv) return;
     const { data, start } = seriesFor(selected);
-    layout = drawChart(cv, data, start, hoverIdx);
+    layout = drawChart(cv, data, start, hoverIdx, drag);
   }
 
   function renderGrid() {
     const grid = root.querySelector('#mgrid'); if (!grid) return;
     const t = today(), fw = firstWarDay();
     if (!cats().includes(cat)) cat = 'All';
-    const items = allItems().filter(i => cat === 'All' || i.cat === cat);
+    const items = visibleItems().filter(i => cat === 'All' || i.cat === cat);
     grid.innerHTML = items.map(it => `
       <div class="mcard ${it.id === selected ? 'sel' : ''}" data-id="${it.id}">
-        <div class="nm">${esc(it.name)}${it.custom && !readOnly ? ` <button class="btn-x" title="Delete your item" data-delitem="${it.id}">🗑</button>` : ''}</div>
+        <div class="nm">${esc(it.name)}${!readOnly ? ` <button class="btn-x" title="Delete this item from the market" data-delitem="${it.id}">🗑</button>` : ''}</div>
         <div class="unit">${esc(it.unit)} · ${esc(it.cat)}${it.custom ? ' · ✨ yours' : ''}</div>
         <div class="pr" data-price="${it.id}">${formatCoins(livePrice(it.id))}</div>
         <div class="small" data-chg="${it.id}"></div>
@@ -492,10 +582,16 @@
     grid.querySelectorAll('[data-delitem]').forEach(b => b.onclick = e => {
       e.stopPropagation();
       const it = allItems().find(i => i.id === b.dataset.delitem);
-      if (!confirm(`Delete "${it.name}" from the market?`)) return;
-      ms.customItems = ms.customItems.filter(i => i.id !== it.id); delete live[it.id];
-      if (selected === it.id) selected = 'potion-healing';
+      if (!it) return;
+      if (it.custom) {
+        if (!confirm(`Delete "${it.name}" from the market?\n\nThis is your own item, so it's gone for good.`)) return;
+        ms.customItems = ms.customItems.filter(i => i.id !== it.id); delete live[it.id];
+      } else {
+        if (!confirm(`Delete "${it.name}" from the market?\n\n(You can bring it back later under "Deleted items".)`)) return;
+        ms.hiddenItems = [...(ms.hiddenItems || []), it.id];
+      }
       saveM(); render(root);
+      window.toast && window.toast(`🗑 ${it.name} removed from the market.`);
     });
     grid.querySelectorAll('.mcard').forEach(c => c.onclick = () => {
       selected = c.dataset.id; hoverIdx = null;
@@ -539,7 +635,7 @@
   }
 
   function stop() { clearInterval(timer); root = null; }
-  function reset() { const keep = { customItems: ms.customItems, cityId: ms.cityId }; ms = { ...defaultMState(), ...keep }; saveM(); for (const k in live) live[k] = 0; }
+  function reset() { const keep = { customItems: ms.customItems, hiddenItems: ms.hiddenItems || [], cityId: ms.cityId }; ms = { ...defaultMState(), ...keep }; saveM(); for (const k in live) live[k] = 0; }
   function setCity(id) { ms.cityId = id || null; saveM(); }
   function reload() { ms = loadM(); for (const k in live) live[k] = 0; cache = null; }
   function useState(s, opts = {}) { ms = sanitize(s); readOnly = !!opts.readOnly; for (const k in live) live[k] = 0; cache = null; }

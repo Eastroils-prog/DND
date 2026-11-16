@@ -1023,7 +1023,7 @@
         factions: n.factions.filter(f => fid.has(f.id)).map(f => ({ id: f.id, rank: f.rank })),
       })),
       locations, factions,
-      market: { seed: m.seed, daysAdvanced: m.daysAdvanced, events: m.events, customItems: m.customItems, cityId: lid.has(m.cityId) ? m.cityId : null },
+      market: { seed: m.seed, daysAdvanced: m.daysAdvanced, events: m.events, customItems: m.customItems, hiddenItems: m.hiddenItems || [], cityId: lid.has(m.cityId) ? m.cityId : null },
     };
   }
   window.World.buildPlayerData = buildPlayerData;
