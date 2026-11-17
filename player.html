@@ -2,15 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e15">
   <meta name="robots" content="noindex">
   <title>Player Page — World Keeper</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon-64.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Frindeval">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body class="locked">
   <!-- If anything breaks, show a red bar with the error so it can be sent to Claude -->
   <script>
-    window.APP_VERSION = '8';
+    window.APP_VERSION = '10';
     window.showAppError = function (msg) {
       var b = document.getElementById('appError');
       if (!b) { b = document.createElement('div'); b.id = 'appError'; b.className = 'app-error'; document.body.prepend(b); }
@@ -21,10 +29,11 @@
   </script>
 
   <header class="topbar">
-    <div class="brand">🎭 Frindeval <span class="ver">v8</span></div>
+    <div class="brand"><img class="brand-ico" src="icons/favicon-64.png" alt="">Frindeval <span class="ver">v10</span></div>
     <nav class="tabs" id="tabs">
-      <a href="#people" data-tab="people">🧙 Known NPCs</a>
-      <a href="#maps" data-tab="maps">🗺 Maps</a>
+      <a href="#people" data-tab="people"><span class="ti">🧙</span><span class="tl">Known NPCs</span></a>
+      <a href="#char" data-tab="char"><span class="ti">🛡</span><span class="tl">My character</span></a>
+      <a href="#maps" data-tab="maps"><span class="ti">🗺</span><span class="tl">Maps</span></a>
     </nav>
     <span id="who" class="small muted" style="margin-left:auto"></span>
     <button class="btn small" id="logoutBtn" hidden>🚪 Log out</button>
@@ -33,9 +42,11 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
-  <script src="config.js?v=8"></script>
-  <script src="cloud.js?v=8"></script>
-  <script src="similar.js?v=8"></script>
-  <script src="player.js?v=8"></script>
+  <script src="config.js?v=10"></script>
+  <script src="cloud.js?v=10"></script>
+  <script src="pwa.js?v=10"></script>
+  <script src="similar.js?v=10"></script>
+  <script src="chartree.js?v=10"></script>
+  <script src="player.js?v=10"></script>
 </body>
 </html>

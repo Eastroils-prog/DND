@@ -10,4 +10,6 @@
 window.WORLD_KEEPER_CONFIG = {
   supabaseUrl: 'https://vzbsjvxtfgslucabtiia.supabase.co',
   supabaseAnonKey: 'sb_publishable_dNjQ0-lEiWwgvQiqz3yPvQ_phL-PitI', // public key — safe to share
+  // public half of the notification key (the private half is a Supabase secret)
+  vapidPublicKey: 'BMLAiEyBTCxen-cz_wXYXT1oeBeu6wSEvRfpERJrHmQq2B-vBIIoMVqHJsmysQzmibt6yuHFx7-qx9Y4lAgx6Kw',
 };

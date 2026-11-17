@@ -16,7 +16,7 @@
   try { meta = { ...meta, ...JSON.parse(localStorage.getItem(META_KEY) || '{}') }; } catch (e) { /* ignore */ }
   const saveMeta = () => { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) { /* ignore */ } };
 
-  let user = null, row = null, timer = null, getPayload = null, applyRemote = null, busy = false;
+  let user = null, row = null, timer = null, getPayload = null, applyRemote = null, onPushed = null, busy = false;
   let status = configured ? 'loading' : 'local', statusMsg = '';
   const listeners = [];
   function setStatus(s, msg = '') { status = s; statusMsg = msg; listeners.forEach(f => { try { f(s, msg); } catch (e) { /* ignore */ } }); }
@@ -29,7 +29,7 @@
 
   let noSync = false;
   async function init(opts) {
-    getPayload = opts.getPayload; applyRemote = opts.applyRemote; noSync = !!opts.noSync; // the player page never uploads anything
+    getPayload = opts.getPayload; applyRemote = opts.applyRemote; onPushed = opts.onPushed || null; noSync = !!opts.noSync; // the player page never uploads anything
     if (!sb) { setStatus('local'); return; }
     const { data } = await sb.auth.getSession();
     user = data.session ? data.session.user : null;
@@ -109,6 +109,7 @@
       row = data;
       meta = { ownerId: user.id, lastSyncedAt: data.updated_at, dirty: false }; saveMeta();
       setStatus('synced');
+      if (onPushed) { try { onPushed(p.player); } catch (e) { /* ignore */ } }
     } catch (e) {
       setStatus('error', friendly(e));
     } finally { busy = false; }
@@ -172,6 +173,51 @@
     }
     return data;
   }
+  // ---- phone notifications to players ----
+  async function notifyPlayers(body) {
+    const { data, error } = await sb.functions.invoke('notify-players', { body });
+    if (error) {
+      let msg = error.message;
+      try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* ignore */ }
+      throw new Error(msg);
+    }
+    return data;
+  }
+  // ---- player characters ----
+  async function listCharacters(owner) {
+    const { data, error } = await sb.from('player_characters').select('*').eq('owner', owner || user.id).order('updated_at');
+    if (error) throw error; return data || [];
+  }
+  async function myCharacter(owner) {
+    const { data, error } = await sb.from('player_characters').select('*').eq('owner', owner).eq('player', user.id).maybeSingle();
+    if (error) throw error; return data;
+  }
+  async function saveCharacter(owner, playerName, data) {
+    const { data: row, error } = await sb.from('player_characters')
+      .upsert({ owner, player: user.id, player_name: playerName, data, updated_at: new Date().toISOString() }, { onConflict: 'owner,player' }).select().single();
+    if (error) throw error; return row;
+  }
+  // ---- the party pin: one per map ----
+  async function listPartyPins(owner) {
+    const { data, error } = await sb.from('party_pins').select('*').eq('owner', owner || user.id);
+    if (error) throw error; return data || [];
+  }
+  async function setPartyPin(owner, mapId, x, y, name) {
+    const { error } = await sb.from('party_pins').upsert({ owner, map_id: mapId, x, y, set_by_name: name, updated_at: new Date().toISOString() }, { onConflict: 'owner,map_id' });
+    if (error) throw error;
+  }
+  async function clearPartyPin(owner, mapId) { const { error } = await sb.from('party_pins').delete().eq('owner', owner).eq('map_id', mapId); if (error) throw error; }
+  // ---- AI helper (NPCs and backstories) ----
+  async function ai(body) {
+    const { data, error } = await sb.functions.invoke('generate-npc', { body });
+    if (error) {
+      let msg = error.message;
+      try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) { /* ignore */ }
+      if (/Failed to send a request|not found/i.test(msg)) msg = 'The AI helper is not installed yet.';
+      throw new Error(msg);
+    }
+    return data;
+  }
   // ---- NPCs added by players ----
   // the admin can preview what players see
   async function myOwnPlayerData() {
@@ -214,7 +260,7 @@
   }
 
   window.Cloud = {
-    configured, init, changed, getRole, managePlayers, myPlayerWorld, myOwnPlayerData, listPlayerNpcs, addPlayerNpc, updatePlayerNpc, deletePlayerNpc, toEmail, sb, push, pull, signIn, signUp, signOut, regenerateLink, playerLink, generateNpc,
+    configured, init, changed, getRole, managePlayers, notifyPlayers, listCharacters, myCharacter, saveCharacter, listPartyPins, setPartyPin, clearPartyPin, ai, myPlayerWorld, myOwnPlayerData, listPlayerNpcs, addPlayerNpc, updatePlayerNpc, deletePlayerNpc, toEmail, sb, push, pull, signIn, signUp, signOut, regenerateLink, playerLink, generateNpc,
     onStatus: f => { listeners.push(f); f(status, statusMsg); },
     get user() { return user; }, get role() { return role; }, get status() { return status; }, get statusMsg() { return statusMsg; },
     get lastSyncedAt() { return meta.lastSyncedAt; },

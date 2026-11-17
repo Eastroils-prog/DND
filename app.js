@@ -377,7 +377,7 @@
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab !== 'market') window.Market.stop();
     const app = $('#app');
-    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, maps: renderMaps, bestiary: renderBestiary, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings, cloud: renderSettings }[tab] || renderNpcs)(app);
+    ({ npcs: renderNpcs, locations: renderLocations, factions: renderFactions, maps: renderMaps, bestiary: renderBestiary, party: renderParty, tree: renderTree, market: () => window.Market.render(app), settings: renderSettings, cloud: renderSettings }[tab] || renderNpcs)(app);
   }
   // lets the market read your locations (for city prices)
   window.World = { locations: () => state.locations, esc };
@@ -390,30 +390,36 @@
     app.innerHTML = `
       <div class="split">
         <aside class="panel">
-          <div class="row"><h2 style="margin:0">NPCs <span class="muted small">(${state.npcs.length})</span></h2>
+          <div class="row"><h2 style="margin:0">NPCs <span class="muted small">(${state.npcs.filter(n => !n.ancestor).length})</span></h2>
             <button class="btn primary" id="newNpc" style="flex:0">+ New NPC</button></div>
           <div class="row" style="margin-top:8px">
             <button class="btn small" id="randNpc" title="Make up a random NPC instantly (no internet needed)">🎲 Random NPC</button>
             <button class="btn small" id="aiNpc" title="Describe an NPC and let the AI write it">🤖 AI NPC</button>
           </div>
           ${gateState() === 'admin' ? `<button class="btn small" id="inboxBtn" style="width:100%;margin-top:8px">${inboxLabel()}</button>` : ''}
+          <div class="seg" role="tablist" style="margin-top:8px">
+            <button class="btn small ${ui.who !== 'shown' ? 'on' : ''}" data-seg="">👥 All</button>
+            <button class="btn small ${ui.who === 'shown' ? 'on' : ''}" data-seg="shown">👁 Shown to players (${state.npcs.filter(n => n.known && !n.ancestor).length})</button>
+          </div>
           <div class="stack" style="margin-top:12px">
             <input id="npcSearch" placeholder="🔍 Search name, job, race…" value="${esc(ui.search)}">
-            <select id="npcWho">${[['', '👥 Everyone (living world)'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now'], ['ancestors', '📜 Ancestors (family trees)'], ['all', '🗂 Absolutely everyone']]
+            <select id="npcWho">${[['', '👥 Everyone (living world)'], ['shown', '👁 Shown to players'], ['main', '⭐ Main characters'], ['villagers', '🏡 Villagers'], ['travel', '🐎 Travellers'], ['road', '🛤 On the road now'], ['ancestors', '📜 Ancestors (family trees)'], ['all', '🗂 Absolutely everyone']]
               .map(([v, l]) => `<option value="${v}" ${ui.who === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
             <select id="npcLoc"><option value="">📍 All locations</option><option value="__none" ${ui.locFilter === '__none' ? 'selected' : ''}>Unknown / wandering</option>
               ${[...state.locations].sort(byName).map(l => `<option value="${l.id}" ${ui.locFilter === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select>
           </div>
           <ul class="item-list" id="npcList"></ul>
         </aside>
-        <section class="panel" id="npcDetail"></section>
+        <div class="detail-col"><button class="btn mobile-back" id="npcBack">← All NPCs</button><section class="panel" id="npcDetail"></section></div>
       </div>`;
     $('#newNpc').onclick = () => { ui.npcId = null; ui.draft = null; ui.editing = true; renderNpcDetail(); };
     $('#randNpc').onclick = () => { ui.npcId = null; ui.draft = randomNpc(confirm('Give them a family too?\n\nOK = yes, with family\nCancel = just one NPC')); ui.editing = true; renderNpcList(); renderNpcDetail(); };
     $('#aiNpc').onclick = () => { ui.npcId = null; ui.editing = false; ui.draft = null; renderNpcList(); renderAiPanel(); };
     $('#npcSearch').oninput = e => { ui.search = e.target.value; renderNpcList(); };
     $('#npcLoc').onchange = e => { ui.locFilter = e.target.value; renderNpcList(); };
-    $('#npcWho').onchange = e => { ui.who = e.target.value; renderNpcList(); };
+    $('#npcWho').onchange = e => { ui.who = e.target.value; renderNpcs($('#app')); };
+    document.querySelectorAll('[data-seg]').forEach(b => b.onclick = () => { ui.who = b.dataset.seg; renderNpcs($('#app')); });
+    $('#npcBack').onclick = () => { ui.npcId = null; ui.editing = false; ui.draft = null; setDetail(false); renderNpcList(); window.scrollTo(0, 0); };
     const ib = $('#inboxBtn'); if (ib) ib.onclick = () => { ui.npcId = null; ui.editing = false; renderNpcList(); renderPlayerInbox(); loadPlayerNpcs().then(renderPlayerInbox); };
     renderNpcList(); renderNpcDetail();
   }
@@ -423,21 +429,23 @@
     const list = state.npcs.filter(n =>
       (!q || [n.name, n.occupation, n.race].some(v => (v || '').toLowerCase().includes(q))) &&
       (!ui.locFilter || (ui.locFilter === '__none' ? !loc(n.locationId) : n.locationId === ui.locFilter)) &&
-      (ui.who === 'all' || (ui.who === 'ancestors' ? n.ancestor : !n.ancestor && (!ui.who || (ui.who === 'main' ? !n.generated : ui.who === 'villagers' ? n.generated : ui.who === 'travel' ? !!n.travel : !!(n.travel && n.travel.road)))))
+      (ui.who === 'all' || (ui.who === 'ancestors' ? n.ancestor : !n.ancestor && (!ui.who || (ui.who === 'shown' ? n.known : ui.who === 'main' ? !n.generated : ui.who === 'villagers' ? n.generated : ui.who === 'travel' ? !!n.travel : !!(n.travel && n.travel.road)))))
     ).sort(byName);
     $('#npcList').innerHTML = list.length ? list.map(n => `
       <li data-id="${n.id}" class="li-flex ${n.id === ui.npcId ? 'sel' : ''}">${avatar(n)}<div>
-        <div>${esc(n.name)} ${n.status !== 'Alive' ? `<span class="badge ${n.status === 'Dead' ? 'dead' : 'missing'}">${esc(n.status)}</span>` : ''}</div>
+        <div>${n.known ? '<span title="Shown to players">👁</span> ' : ''}${esc(n.name)} ${n.status !== 'Alive' ? `<span class="badge ${n.status === 'Dead' ? 'dead' : 'missing'}">${esc(n.status)}</span>` : ''}</div>
         <div class="sub">${esc([n.race, n.occupation].filter(Boolean).join(' · '))} ${n.travel && n.travel.road && loc(n.travel.road.to) ? '· 🐎 → ' + esc(loc(n.travel.road.to).name) : loc(n.locationId) ? '· 📍 ' + esc(loc(n.locationId).name) : ''}</div>
       </div></li>`).join('') : '<li class="muted" style="cursor:default">No NPCs found.</li>';
     document.querySelectorAll('#npcList li[data-id]').forEach(li => li.onclick = () => {
       ui.npcId = li.dataset.id; ui.editing = false; renderNpcList(); renderNpcDetail();
-      if (window.innerWidth < 800) $('#npcDetail').scrollIntoView({ behavior: 'smooth' });
     });
   }
 
+  // phones show the list OR the details: this switches between them
+  function setDetail(on) { const sp = document.querySelector('#app > .split'); if (sp) sp.classList.toggle('has-detail', !!on); if (on && window.innerWidth <= 800) window.scrollTo(0, 0); }
   function renderNpcDetail() {
     const box = $('#npcDetail'); if (!box) return;
+    setDetail(!!(npc(ui.npcId) || ui.editing));
     const n = npc(ui.npcId);
     if (ui.editing) return renderNpcForm(box, n);
     if (!n) {
@@ -535,7 +543,7 @@
       </div>`;
     wireTravel(n);
     $('#printPlayer').onclick = () => printNpcs([n], false);
-    $('#toggleKnown').onclick = () => { n.known = !n.known; save(); toast(n.known ? '👁 Players can now see this NPC (no secrets).' : '🙈 Hidden from the player view.'); renderNpcDetail(); };
+    $('#toggleKnown').onclick = () => { n.known = !n.known; save(); toast(n.known ? '👁 Players can now see this NPC (no secrets).' : '🙈 Hidden from the player view.'); renderNpcs($('#app')); };
     $('#printDm').onclick = () => printNpcs([n], true);
     $('#portraitFile').onchange = async e => {
       try { n.portrait = await readPortrait(e.target.files[0]); save(); toast('📷 Picture added!'); renderNpcList(); renderNpcDetail(); }
@@ -890,7 +898,7 @@
     return list.map(m => `<a href="#" class="chip enemy ${m.boss ? 'boss' : ''}" data-monster="${esc(m.id)}">${m.boss ? '💀 ' : ''}${esc(m.name)} <span class="muted small">CR ${esc(m.cr)}</span></a>`).join('');
   }
   function wireEnemyChips(root) {
-    root.querySelectorAll('[data-monster]').forEach(a => a.onclick = e => { e.preventDefault(); ui.monsterId = a.dataset.monster; ui.monsterEdit = false; go('bestiary'); });
+    root.querySelectorAll('[data-monster]').forEach(a => a.onclick = e => { e.preventDefault(); ui.monsterId = a.dataset.monster; ui.monsterEdit = false; ui.mOpen = true; go('bestiary'); });
     root.querySelectorAll('[data-encounter]').forEach(b => b.onclick = () => {
       const L = loc(b.dataset.encounter), r = L && rollEncounter(L);
       const out = root.querySelector(`[data-encout="${b.dataset.encounter}"]`);
@@ -924,17 +932,19 @@
             <div>${m.boss ? '💀 ' : ''}${esc(m.name)} <span class="badge">CR ${esc(m.cr)}</span></div>
             <div class="sub">${esc(m.size || '')} ${esc(m.type || '')}${m.dungeon ? ' · ⚱️ ' + esc(m.dungeon) : ''}${m.custom ? ' · ✏️ yours' : ''}</div></li>`).join('') || '<li class="muted">No creatures found.</li>'}</ul>
         </aside>
-        <section id="mDetail"></section>
+        <div class="detail-col"><button class="btn mobile-back" id="mBack">← All creatures</button><section id="mDetail"></section></div>
       </div>`;
     $('#mSearch').oninput = e => { ui.mSearch = e.target.value; const p = e.target.selectionStart; renderBestiary(app); const i = $('#mSearch'); i.focus(); i.setSelectionRange(p, p); };
     $('#mGroup').onchange = e => { ui.mGroup = e.target.value; renderBestiary(app); };
     $('#mType').onchange = e => { ui.mType = e.target.value; renderBestiary(app); };
-    $('#newMonster').onclick = () => { ui.monsterEdit = 'new'; renderMonsterDetail(); };
-    app.querySelectorAll('[data-mid]').forEach(li => li.onclick = () => { ui.monsterId = li.dataset.mid; ui.monsterEdit = false; renderBestiary(app); });
+    $('#newMonster').onclick = () => { ui.monsterEdit = 'new'; ui.mOpen = true; renderMonsterDetail(); };
+    $('#mBack').onclick = () => { ui.mOpen = false; ui.monsterEdit = false; setDetail(false); window.scrollTo(0, 0); };
+    app.querySelectorAll('[data-mid]').forEach(li => li.onclick = () => { ui.monsterId = li.dataset.mid; ui.monsterEdit = false; ui.mOpen = true; renderBestiary(app); });
     renderMonsterDetail();
   }
   function renderMonsterDetail() {
     const box = $('#mDetail'); if (!box) return;
+    setDetail(!!ui.mOpen || window.innerWidth > 800);
     if (ui.monsterEdit) return renderMonsterForm(box, ui.monsterEdit === 'new' ? null : monster(ui.monsterId));
     const m = monster(ui.monsterId);
     if (!m) { box.innerHTML = '<div class="panel empty">No creatures yet.</div>'; return; }
@@ -1124,6 +1134,26 @@
     });
   }
 
+  // ================= NOTIFY PLAYERS =================
+  // After each upload: did players get new NPCs or maps? Then their phones get a notification.
+  function notifyIfNew(player) {
+    if (!player || gateState() !== 'admin') return;
+    const now = { npcs: (player.npcs || []).map(n => n.id), maps: (player.maps || []).map(m => m.id) };
+    const before = state.shared;
+    state.shared = now; saveLocal();   // remembered with the world, so other devices know too
+    if (!before) return;                // first upload: nothing to compare with yet
+    const newNpcs = (player.npcs || []).filter(n => !before.npcs.includes(n.id));
+    const newMaps = now.maps.filter(id => !before.maps.includes(id));
+    if (!newNpcs.length && !newMaps.length) return;
+    const parts = [];
+    if (newNpcs.length === 1) parts.push(`🧙 You know someone new: ${newNpcs[0].name}`);
+    else if (newNpcs.length) parts.push(`🧙 ${newNpcs.length} new people: ${newNpcs.slice(0, 3).map(n => n.name).join(', ')}${newNpcs.length > 3 ? '…' : ''}`);
+    if (newMaps.length) parts.push(newMaps.length === 1 ? '🗺 A new map' : `🗺 ${newMaps.length} new maps`);
+    window.Cloud.notifyPlayers({ title: 'Frindeval — news from your DM', body: parts.join(' · '), url: 'player.html', tag: 'shared' })
+      .then(r => { if (r && r.sent) toast(`🔔 ${r.sent} player phone${r.sent === 1 ? '' : 's'} notified.`); })
+      .catch(() => { /* notifications are optional */ });
+  }
+
   // ================= NPCs ADDED BY PLAYERS (admin inbox) =================
   ui.playerNpcs = [];
   async function loadPlayerNpcs() {
@@ -1134,7 +1164,7 @@
   const inboxLabel = () => { const n = ui.playerNpcs.filter(p => p.status === 'new').length; return `📝 From players${n ? ` <span class="badge dead">${n} new</span>` : ` (${ui.playerNpcs.length})`}`; };
   const candidates = () => state.npcs.filter(n => !n.ancestor).map(n => ({ n, cmp: { name: n.name, occupation: n.occupation, place: loc(n.locationId) ? loc(n.locationId).name : '' } }));
   function renderPlayerInbox() {
-    const box = $('#npcDetail'); if (!box) return;
+    const box = $('#npcDetail'); if (!box) return; setDetail(true);
     const all = candidates();
     const list = [...ui.playerNpcs].sort((a, b) => (a.status === 'new' ? 0 : 1) - (b.status === 'new' ? 0 : 1) || String(b.created_at).localeCompare(String(a.created_at)));
     box.innerHTML = `<h2>📝 NPCs added by players</h2>
@@ -1179,6 +1209,48 @@
     const notes = ui.playerNpcs.filter(p => p.linked_npc_id === n.id);
     if (!notes.length) return '';
     return `<div><h3>📝 Player notes</h3>${notes.map(p => `<div class="field-view small"><b>${esc(p.author_name || 'A player')}</b> wrote${p.name !== n.name ? ` (as "${esc(p.name)}")` : ''}: ${esc(p.description || '—')}</div>`).join('')}</div>`;
+  }
+
+  // ================= PARTY (player characters) =================
+  ui.partyPins = [];
+  async function loadPartyPins() { if (gateState() !== 'admin') return; try { ui.partyPins = await window.Cloud.listPartyPins(); } catch (e) { ui.partyPins = []; } }
+  async function renderParty(app) {
+    if (gateState() !== 'admin') { app.innerHTML = '<div class="panel empty">🛡 Player characters appear here once the cloud is switched on and players have logged in.</div>'; return; }
+    app.innerHTML = '<div class="panel empty">Loading the party…</div>';
+    let chars = [];
+    try { chars = await window.Cloud.listCharacters(); } catch (e) { app.innerHTML = `<div class="panel empty">⚠️ ${esc(e.message)}</div>`; return; }
+    const inWorld = name => state.npcs.find(n => !n.ancestor && sameName(n.name, name));
+    app.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2 style="margin:0">🛡 The party</h2>
+      <p class="small muted" style="margin:6px 0 0">Characters your players made, with their backstories and families. Press <b>➕ Add to world</b> to turn someone from a backstory into a real NPC (players will know them).</p></div>
+      <div class="party-grid">${chars.map(row => {
+        const c = row.data || {};
+        const person = (p, kind) => { const n = inWorld(p.name); return `<li><b>${esc(p.name)}</b> <span class="muted small">${esc(kind === 'fam' ? (p.relation + (p.alive === false ? ', dead' : '')) : p.role)}${p.race ? ' · ' + esc(p.race) : ''}${p.place ? ' · ' + esc(p.place) : ''}</span>
+          ${(p.notes || p.description) ? `<div class="small">${esc(p.notes || p.description)}</div>` : ''}
+          ${n ? `<a href="#" class="small" data-goto="${n.id}">✓ in your world</a>` : `<button class="btn small" data-addp="${esc(row.id)}|${kind}|${esc(p.id)}">➕ Add to world</button>`}</li>`; };
+        return `<div class="panel party-card">
+          <div class="li-flex">${c.portrait ? `<img class="avatar" src="${esc(safeImg(c.portrait))}" alt="" style="width:64px;height:64px">` : `<span class="avatar ph" style="width:64px;height:64px;font-size:28px">${esc((c.name || '?')[0])}</span>`}
+            <div><h3 style="margin:0">${esc(c.name || 'Unnamed')}</h3>
+            <div class="small muted">${esc([c.race, c.cls && c.cls + (c.level ? ' ' + c.level : ''), c.alignment].filter(Boolean).join(' · '))}</div>
+            <div class="small">🧑 played by <b>${esc(row.player_name || 'a player')}</b> · updated ${esc(new Date(row.updated_at).toLocaleDateString())}</div></div></div>
+          ${c.appearance ? `<p class="small"><b>Looks:</b> ${esc(c.appearance)}</p>` : ''}
+          ${c.personality ? `<p class="small"><b>Personality:</b> ${esc(c.personality)}</p>` : ''}
+          ${c.backstory ? `<details class="small"><summary><b>📖 Backstory</b></summary><p class="prewrap">${esc(c.backstory)}</p></details>` : ''}
+          ${(c.family || []).length ? `<details class="small" open><summary><b>🌳 Family (${c.family.length})</b></summary><div class="tree-wrap char-tree">${window.CharTree ? window.CharTree.svg(c) : ''}</div><ul class="members">${c.family.map(f => person(f, 'fam')).join('')}</ul></details>` : ''}
+          ${(c.npcs || []).length ? `<details class="small" open><summary><b>👥 People from their past (${c.npcs.length})</b></summary><ul class="members">${c.npcs.map(n => person(n, 'npc')).join('')}</ul></details>` : ''}
+        </div>`;
+      }).join('') || '<div class="panel empty">No characters yet. Players make theirs on the player page (🛡 My character).</div>'}</div>`;
+    app.querySelectorAll('[data-goto]').forEach(a => a.onclick = e => { e.preventDefault(); ui.npcId = a.dataset.goto; ui.editing = false; go('npcs'); });
+    app.querySelectorAll('[data-addp]').forEach(b => b.onclick = () => {
+      const [rowId, kind, pid] = b.dataset.addp.split('|');
+      const row = chars.find(r => r.id === rowId), c = row.data || {}, p = (kind === 'fam' ? c.family : c.npcs).find(x => x.id === pid);
+      if (!p) return;
+      const L = p.place ? state.locations.find(l => window.Similar && window.Similar.nameScore(l.name, p.place) > 0.85) : null;
+      const n = { id: uid(), name: p.name, race: p.race || '', gender: '', age: '', occupation: kind === 'fam' ? `${c.name}'s ${p.relation}` : (p.role || ''),
+        alignment: 'True Neutral', status: p.alive === false ? 'Dead' : 'Alive', description: p.notes || p.description || '',
+        notes: `From ${c.name}'s backstory (played by ${row.player_name}).`, locationId: L ? L.id : null, known: true,
+        parents: [], spouses: [], siblings: [], bonds: [], factions: [], portrait: '' };
+      state.npcs.push(n); save(); toast(`➕ ${p.name} is now in your world — players can see them.`); renderParty(app);
+    });
   }
 
   // ================= TRAVEL SIMULATION =================
@@ -1291,7 +1363,8 @@
       img.src = url;
     });
   }
-  function renderMaps(app) {
+  function renderMaps(app, refreshed) {
+    if (!refreshed && gateState() === 'admin') loadPartyPins().then(() => { if ((location.hash || '').startsWith('#maps') && !ui.partyPlacing) renderMaps(app, true); });
     const maps = state.maps;
     if (!maps.find(m => m.id === ui.mapId)) ui.mapId = maps.length ? maps[0].id : null;
     const m = maps.find(x => x.id === ui.mapId);
@@ -1322,7 +1395,11 @@
             const r = p.travel.road, [x1, y1] = m.pins[r.from], [x2, y2] = m.pins[r.to], f = Math.min(0.9, Math.max(0.1, (r.total - r.left + 0.5) / r.total));
             return `<button class="traveller ${p.generated ? '' : 'main'}" data-traveller="${p.id}" style="left:${x1 + (x2 - x1) * f}%;top:${y1 + (y2 - y1) * f}%" title="${esc(p.name)} → ${esc(loc(r.to).name)} (${r.left} d)">${p.travel.kind === 'noble' ? '👑' : p.travel.kind === 'courier' ? '🦅' : '🐎'}</button>`;
           }).join('')}
+          ${(() => { const pp = (ui.partyPins || []).find(p => p.map_id === m.id); return pp ? `<div class="party-pin" style="left:${Number(pp.x)}%;top:${Number(pp.y)}%" title="The party — set by ${esc(pp.set_by_name)}">⚑</div>` : ''; })()}
         </div></div>
+        ${gateState() === 'admin' ? `<div class="row party-bar" style="margin-top:8px">
+          <span class="small" style="flex:1 1 200px">${(() => { const pp = (ui.partyPins || []).find(p => p.map_id === m.id); return pp ? `⚑ <b>Party pin</b> — set by ${esc(pp.set_by_name || 'someone')}` : '⚑ No party pin on this map.'; })()}${ui.partyPlacing ? ' <b>👆 Click the map.</b>' : ''}</span>
+          <button class="btn small ${ui.partyPlacing ? 'on' : ''}" id="partyPlace" style="flex:0">${ui.partyPlacing ? '✕ Cancel' : '⚑ Move party pin'}</button></div>` : ''}
         <div id="pinCard"></div>
         ${travelPanel()}
         <div class="row" style="margin-top:10px;justify-content:flex-start">
@@ -1346,7 +1423,15 @@
     if (!m) return;
     app.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => { ui.mapZoom = +b.dataset.zoom; renderMaps(app); });
     $('#pinLoc').onchange = e => { ui.pinLoc = e.target.value; renderMaps(app); };
-    $('#mapImg').onclick = e => {
+    const pb = $('#partyPlace'); if (pb) pb.onclick = () => { ui.partyPlacing = !ui.partyPlacing; ui.pinLoc = ''; renderMaps(app); };
+    $('#mapImg').onclick = async e => {
+      if (ui.partyPlacing) {
+        const r = e.target.getBoundingClientRect();
+        const x = Math.round(((e.clientX - r.left) / r.width) * 1000) / 10, y = Math.round(((e.clientY - r.top) / r.height) * 1000) / 10;
+        try { await window.Cloud.setPartyPin(window.Cloud.user.id, m.id, x, y, 'the DM'); ui.partyPlacing = false; await loadPartyPins(); renderMaps(app); toast('⚑ Party pin moved — players see it.'); }
+        catch (err) { toast('⚠️ ' + err.message); }
+        return;
+      }
       if (!ui.pinLoc) return;
       const r = e.target.getBoundingClientRect();
       const x = Math.round(((e.clientX - r.left) / r.width) * 1000) / 10, y = Math.round(((e.clientY - r.top) / r.height) * 1000) / 10;
@@ -1478,7 +1563,7 @@
         if (!pos[pid]) return;
         const a = pos[pid], b = pos[id];
         const x1 = a.x + W / 2, y1 = a.y + H, x2 = b.x + W / 2, y2 = b.y, my = (y1 + y2) / 2;
-        mk('path', { d: `M${x1},${y1} V${my} H${x2} V${y2}`, fill: 'none', stroke: '#8a7a5e', 'stroke-width': 1.6 });
+        mk('path', { d: `M${x1},${y1} V${my} H${x2} V${y2}`, fill: 'none', stroke: '#56627a', 'stroke-width': 1.6 });
       });
     });
     // spouse lines
@@ -1498,7 +1583,7 @@
     Object.entries(pos).forEach(([id, p]) => {
       const n = npc(id), isFocus = id === focus.id, dead = n.status === 'Dead';
       const g = mk('g', { class: 'tree-node', transform: `translate(${p.x},${p.y})` });
-      mk('rect', { width: W, height: H, rx: 10, fill: isFocus ? '#3d3220' : '#26201a', stroke: isFocus ? '#e0b354' : dead ? '#e2735f' : '#4a3f31', 'stroke-width': isFocus ? 2.5 : 1.5 }, g);
+      mk('rect', { width: W, height: H, rx: 10, fill: isFocus ? '#3a2f1a' : '#1f2533', stroke: isFocus ? '#f0b54a' : dead ? '#ef7a64' : '#3a4459', 'stroke-width': isFocus ? 2.5 : 1.5 }, g);
       let tx = W / 2;
       if (n.portrait) {
         const cid = 'clip-' + id;
@@ -1507,11 +1592,11 @@
         im.setAttribute('href', n.portrait);
         tx = 56 + (W - 56) / 2;
       }
-      const name = mk('text', { x: tx, y: 24, 'text-anchor': 'middle', fill: dead ? '#b3a58c' : '#efe6d4', 'font-size': 13, 'font-weight': 600, 'font-family': 'system-ui, sans-serif' }, g);
+      const name = mk('text', { x: tx, y: 24, 'text-anchor': 'middle', fill: dead ? '#9ea6b8' : '#ece7dc', 'font-size': 13, 'font-weight': 600, 'font-family': 'system-ui, sans-serif' }, g);
       const nm = (dead ? '✝ ' : '') + n.name;
       const nmax = n.portrait ? 14 : 21;
       name.textContent = nm.length > nmax ? nm.slice(0, nmax - 1) + '…' : nm; // textContent = safe, no HTML
-      const sub = mk('text', { x: tx, y: 43, 'text-anchor': 'middle', fill: '#b3a58c', 'font-size': 11, 'font-family': 'system-ui, sans-serif' }, g);
+      const sub = mk('text', { x: tx, y: 43, 'text-anchor': 'middle', fill: '#9ea6b8', 'font-size': 11, 'font-family': 'system-ui, sans-serif' }, g);
       const st = [n.race, n.occupation].filter(Boolean).join(' · ');
       const smax = n.portrait ? 17 : 26;
       sub.textContent = st.length > smax ? st.slice(0, smax - 1) + '…' : st;
@@ -1519,6 +1604,9 @@
       g.addEventListener('click', () => { ui.treeId = id; renderTree($('#app')); });
     });
     wrap.innerHTML = ''; wrap.appendChild(svg);
+    // start with the selected person in the middle of the screen
+    const fp = pos[focus.id];
+    if (fp) { wrap.scrollLeft = Math.max(0, fp.x + W / 2 - wrap.clientWidth / 2); wrap.scrollTop = Math.max(0, fp.y + H / 2 - wrap.clientHeight / 2); }
     if (rows.length === 1 && focusRow.length === 1) {
       const p = document.createElement('p'); p.className = 'muted small'; p.style.padding = '0 16px 12px'; p.style.textAlign = 'center';
       p.textContent = 'No family yet. Click "Edit family links" to add parents, children, a spouse or siblings.';
@@ -1650,7 +1738,7 @@
   }
 
   function renderAiPanel() {
-    const box = $('#npcDetail'); if (!box) return;
+    const box = $('#npcDetail'); if (!box) return; setDetail(true);
     const ready = window.Cloud && window.Cloud.configured && window.Cloud.user;
     box.innerHTML = `
       <h2>🤖 Ask the AI for an NPC</h2>
@@ -1747,10 +1835,26 @@
       <p class="small">Players log in at <a href="player.html" target="_blank" rel="noopener">player.html</a> with their username and password.
       They can only <b>add NPCs they meet</b> and <b>look at the maps</b> (no pins, no place names). They see the NPCs you mark <b>👁 Players have met</b> — never your secrets.</p>
       <div id="playersBox"></div>
+      <h3 style="margin-top:14px">📣 Message your players</h3>
+      <p class="small muted">Players who switched on notifications get this on their phone. (New NPCs and maps you share are announced automatically.)</p>
+      <form id="msgForm" class="row" autocomplete="off">
+        <input name="msg" maxlength="300" required placeholder="e.g. Session on Friday at 7! Bring snacks." style="flex:3 1 220px">
+        <button class="btn primary" type="submit" style="flex:0">📣 Send</button>
+      </form>
       <p class="small muted">${state.npcs.filter(n => n.known).length} NPCs are visible to players.</p>`;
     $('#syncNow').onclick = () => C.push();
     $('#logout').onclick = async () => { await C.signOut(); location.reload(); };
     renderPlayersBox();
+    const mf = $('#msgForm');
+    mf.onsubmit = async e => {
+      e.preventDefault();
+      const text = mf.elements.namedItem('msg').value.trim(); if (!text) return;
+      try {
+        const r = await C.notifyPlayers({ title: '📣 Message from your DM', body: text, url: 'player.html', tag: 'message' });
+        toast(r.total ? `📣 Sent to ${r.sent} of ${r.total} phone${r.total === 1 ? '' : 's'}.` : 'Nobody has switched on notifications yet.');
+        if (r.sent) mf.reset();
+      } catch (err) { toast('⚠️ ' + err.message); }
+    };
   }
 
   function syncText(s, msg) {
@@ -1809,6 +1913,7 @@
   }
 
   route();
+  if (window.PWA) { window.PWA.addButton(() => ({})); window.PWA.maybeHint(() => ({})); }
   window.addEventListener('focus', () => loadPlayerNpcs());
   window.Market.onChange = () => { if (window.Cloud) window.Cloud.changed(); };
   // every "🌙 End the day" in the market also moves the travellers
@@ -1819,7 +1924,7 @@
   };
   if (window.Cloud) {
     window.Cloud.onStatus(renderSync);
-    window.Cloud.init({ getPayload: () => ({ data: { ...state, market: window.Market._state() }, player: buildPlayerData() }), applyRemote })
+    window.Cloud.init({ getPayload: () => ({ data: { ...state, market: window.Market._state() }, player: buildPlayerData() }), applyRemote, onPushed: notifyIfNew })
       .catch(e => renderSync('error', e.message));
   }
 })();
