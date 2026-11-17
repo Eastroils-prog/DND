@@ -1253,6 +1253,64 @@
     });
   }
 
+  // ================= 🔍 SEARCH (DM: everything) =================
+  const SEARCH_TYPES = { npc: '🧙 NPCs', place: '🏰 Places', faction: '⚜️ Factions', map: '🗺 Maps', market: '💰 Market', magic: '🔮 Magic items', creature: '🐉 Creatures', vestige: '⚱️ Vestiges', note: '📝 From players' };
+  function searchDocs() {
+    if (!['admin', 'open'].includes(gateState())) return []; // nothing to find before the admin logs in
+    const docs = [];
+    const fname = id => (faction(id) || {}).name || '';
+    state.npcs.forEach(n => {
+      const L = loc(n.locationId);
+      docs.push({ id: 'n:' + n.id, type: 'npc', icon: n.ancestor ? '📜' : n.known ? '👁' : '🧙', title: n.name, weight: n.ancestor ? 0.35 : n.generated ? 1 : 1.3,
+        sub: [n.race, n.occupation, L && '📍 ' + L.name, n.status !== 'Alive' && n.status].filter(Boolean).join(' · '),
+        text: [n.description, n.notes && 'Secret: ' + n.notes, n.alignment, n.factions.map(f => fname(f.id) + ' (' + f.rank + ')').join(', '),
+          n.bonds.map(b => b.type + ': ' + ((npc(b.id) || {}).name || '')).join('; '), n.known ? 'Known to players.' : 'Hidden from players.',
+          n.travel && n.travel.road ? 'Travelling to ' + ((loc(n.travel.road.to) || {}).name || '') : ''].filter(Boolean).join('\n') });
+    });
+    state.locations.forEach(L => {
+      const people = state.npcs.filter(n => n.locationId === L.id && !n.ancestor);
+      docs.push({ id: 'l:' + L.id, type: 'place', icon: L.type === 'Dungeon' ? '⚱️' : '🏰', title: L.name, weight: 1.4, sub: [L.type, L.region].filter(Boolean).join(' · '),
+        text: [L.notes, `Prices: ${labelOf(PRICE_LEVELS, L.priceMod)}. War: ${labelOf(EXPOSURE, L.warExposure)}.`, L.hidden ? 'Secret place.' : '',
+          'People: ' + people.slice(0, 15).map(p => p.name + ' (' + (p.occupation || '') + ')').join(', '),
+          'Possible enemies: ' + enemiesAt(L).map(m => m.name).join(', ')].filter(Boolean).join('\n') });
+    });
+    state.factions.forEach(F => docs.push({ id: 'f:' + F.id, type: 'faction', icon: '⚜️', title: F.name, weight: 1.3, sub: F.type + (loc(F.hqId) ? ' · 🏠 ' + loc(F.hqId).name : ''),
+      text: [F.goals, F.notes && 'Secret: ' + F.notes, 'Members: ' + membersOf(F.id).map(n => n.name + ' (' + rankIn(n, F.id) + ')').join(', ')].filter(Boolean).join('\n') }));
+    state.maps.forEach(m => docs.push({ id: 'm:' + m.id, type: 'map', icon: '🗺', title: m.name, sub: Object.keys(m.pins).length + ' places pinned',
+      text: 'Places on this map: ' + Object.keys(m.pins).map(id => (loc(id) || {}).name).filter(Boolean).join(', ') }));
+    const M = window.Market;
+    if (M && M.visibleGoods) M.visibleGoods().forEach(it => { const p = M.priceNow(it.id); if (p == null) return;
+      docs.push({ id: 'g:' + it.id, type: 'market', icon: '💰', title: it.name, sub: `${M.formatCoins(p)} ${it.unit} · ${it.cat}`,
+        text: `Price today: ${M.formatCoins(p)} ${it.unit}. Normal (rulebook) price: ${M.formatCoins(it.base)}. Category: ${it.cat}.` }); });
+    if (window.MAGIC) {
+      window.MAGIC.ITEMS.forEach(it => { const p = M && M.magicPriceNow ? M.magicPriceNow(it.name) : it.price;
+        docs.push({ id: 'mi:' + it.name, type: 'magic', icon: '🔮', title: it.name, weight: 0.9, sub: `${it.rarity} ${it.type}${it.attune ? ' (attunement)' : ''} · ${Math.round(p).toLocaleString()} gp`,
+          text: [`Book: ${it.source}.`, it.region ? 'Only sold in: ' + it.region : 'Where: ' + window.MAGIC.WHERE[it.rarity], it.text].filter(Boolean).join('\n') }); });
+      window.MAGIC.VESTIGES.forEach(v => docs.push({ id: 'v:' + v.n, type: 'vestige', icon: '⚱️', title: v.name, weight: 1.5, sub: `Vestige ${v.n} · ${v.type} · dungeon CR ${v.cr}`,
+        text: `${v.lore}\nHidden in: ${v.place}. ${v.dungeon}` }));
+    }
+    allMonsters().forEach(m => { const { hp } = monsterMath(m);
+      docs.push({ id: 'c:' + m.id, type: 'creature', icon: m.boss ? '💀' : '🐉', title: m.name, sub: `CR ${m.cr} · ${m.size} ${m.type}${m.dungeon ? ' · ⚱️ ' + m.dungeon : ''}`,
+        text: [`AC ${m.ac}, HP ${hp}, speed ${m.speed}.`, 'Lives in: ' + (m.habitats || []).join(', '), m.lore,
+          'Traits: ' + (m.traits || []).map(t => t[0]).join(', '), 'Actions: ' + (m.actions || []).map(t => t[0]).join(', '),
+          m.legendary ? 'Has legendary actions.' : '', m.res ? 'Resists: ' + m.res : '', m.imm ? 'Immune: ' + m.imm : ''].filter(Boolean).join('\n') }); });
+    (ui.playerNpcs || []).forEach(p => docs.push({ id: 'p:' + p.id, type: 'note', icon: '📝', title: p.name, sub: `added by ${p.author_name || 'a player'}`,
+      text: [p.race, p.occupation, p.location_name && 'Met in ' + p.location_name, p.description].filter(Boolean).join('\n') }));
+    return docs;
+  }
+  function openSearchResult(d) {
+    const [kind, ...rest] = d.id.split(':'), id = rest.join(':');
+    if (kind === 'n') { ui.npcId = id; ui.editing = false; ui.who = npc(id) && npc(id).ancestor ? 'ancestors' : ''; ui.search = ''; ui.locFilter = ''; go('npcs'); }
+    else if (kind === 'l') { if (!showOnMap(id)) { go('locations'); setTimeout(() => { const h = [...document.querySelectorAll('.loc-card h3')].find(x => x.textContent === d.title); if (h) h.scrollIntoView({ block: 'center' }); }, 50); } }
+    else if (kind === 'f') { ui.facId = id; go('factions'); }
+    else if (kind === 'm') { ui.mapId = id; ui.pinSel = null; go('maps'); }
+    else if (kind === 'g') { window.Market.openGood(id); go('market'); }
+    else if (kind === 'mi') { window.Market.openMagic(id); go('market'); }
+    else if (kind === 'v') { const v = window.MAGIC.VESTIGES.find(x => x.n === id); window.World.showOnMapByName(v.place); }
+    else if (kind === 'c') { ui.monsterId = id; ui.monsterEdit = false; ui.mOpen = true; go('bestiary'); }
+    else if (kind === 'p') { ui.npcId = null; ui.editing = false; go('npcs'); setTimeout(() => renderPlayerInbox(), 50); }
+  }
+
   // ================= TRAVEL SIMULATION =================
   // Traders, nobles and couriers walk their route one day at a time. Each "🌙 End the day" moves everyone.
   const KIND_LABEL = { trader: '🐎 Trader', noble: '👑 Noble', courier: '🦅 Courier' };
@@ -1914,6 +1972,15 @@
 
   route();
   if (window.PWA) { window.PWA.addButton(() => ({})); window.PWA.maybeHint(() => ({})); }
+  if (window.Search) window.Search.init({
+    getDocs: searchDocs, open: openSearchResult, types: SEARCH_TYPES,
+    placeholder: 'Search NPCs, places, prices, magic items, creatures… or ask a question',
+    hint: 'Try: "Jarl", "healing", "dragon", "Tuvar" — or ask the AI: "Who secretly hates the Jarl?"',
+    ask: window.Cloud && window.Cloud.configured ? async (question, docs) => {
+      if (gateState() !== 'admin') throw new Error('Log in first.');
+      const r = await window.Cloud.ai({ mode: 'ask', question, docs }); return r.result;
+    } : null,
+  });
   window.addEventListener('focus', () => loadPlayerNpcs());
   window.Market.onChange = () => { if (window.Cloud) window.Cloud.changed(); };
   // every "🌙 End the day" in the market also moves the travellers

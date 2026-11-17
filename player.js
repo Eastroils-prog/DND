@@ -59,6 +59,30 @@
     const lo = $('#logoutBtn'); lo.hidden = false; lo.onclick = async () => { await C.signOut(); location.reload(); };
     document.body.classList.remove('locked');
     await load();
+    if (window.Search) window.Search.init({
+      types: { npc: '🧙 Known NPCs', note: '📝 Added by players' },
+      placeholder: 'Search the people you know… or ask a question',
+      hint: 'Only the NPCs your group knows. Try a name, a job, or ask: "Who is the innkeeper?"',
+      getDocs: () => [
+        ...world.npcs.map(n => ({ id: 'n:' + n.id, type: 'npc', icon: '🧙', title: n.name, weight: 1.2,
+          sub: [n.race, n.occupation, n.status !== 'Alive' && n.status].filter(Boolean).join(' · '),
+          text: [n.description, n.factions.map(f => (fac(f.id) || {}).name).filter(Boolean).join(', '),
+            n.bonds.map(b => b.type + ': ' + ((npc(b.id) || {}).name || '')).join('; '),
+            notes.filter(p => p.linked_npc_id === n.id).map(p => `${p.author_name} noted: ${p.description}`).join('\n')].filter(Boolean).join('\n') })),
+        ...notes.filter(p => !p.linked_npc_id || p.linked_npc_id.startsWith('p:')).map(p => ({ id: 'p:' + p.id, type: 'note', icon: '📝', title: p.name,
+          sub: [p.race, p.occupation, 'added by ' + (p.author_name || 'a player')].filter(Boolean).join(' · '),
+          text: [p.location_name && 'Met in ' + p.location_name, p.description].filter(Boolean).join('\n') })),
+      ],
+      open: d => {
+        const [k, id] = d.id.split(':'); ui.search = '';
+        if (location.hash !== '#people') location.hash = 'people'; else route();
+        setTimeout(() => {
+          const el = document.getElementById((k === 'n' ? 'n-' : 'p-') + (k === 'p' ? (rootOf(notes.find(x => x.id === id) || {}) || {}).id || id : id));
+          if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('sel'); setTimeout(() => el.classList.remove('sel'), 2500); }
+        }, 80);
+      },
+      ask: async (question, docs) => (await C.ai({ mode: 'ask', question, docs, player: true })).result,
+    });
     if (window.PWA) { window.PWA.addButton(() => ({ owner: me.isAdmin ? null : world.owner })); window.PWA.maybeHint(() => ({ owner: me.isAdmin ? null : world.owner })); }
     setInterval(load, 60000); // check for news every minute
     window.addEventListener('hashchange', route);

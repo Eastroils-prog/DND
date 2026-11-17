@@ -802,10 +802,19 @@
     if (window.Market.onDayEnd) window.Market.onDayEnd();
   }
   function setCity(id) { ms.cityId = id || null; saveM(); }
+  // used by the 🔍 search: today's prices, and opening an item on the market page
+  function priceNow(id) { if (!cache) buildHistory(); return cache[id] ? livePrice(id) : null; }
+  function magicPriceNow(name) {
+    const it = window.MAGIC && window.MAGIC.ITEMS.find(i => i.name === name); if (!it) return null;
+    if (!cache) buildHistory(); return magicPriceAt(it, today());
+  }
+  function openGood(id) { selected = id; mview = 'goods'; cat = 'All'; }
+  function openMagic(name) { magicSel = name; mview = 'magic'; mq.search = name; }
+  const visibleGoods = () => visibleItems();
   function reload() { ms = loadM(); for (const k in live) live[k] = 0; cache = null; }
   function useState(s, opts = {}) { ms = sanitize(s); readOnly = !!opts.readOnly; for (const k in live) live[k] = 0; cache = null; }
 
   window.addEventListener('resize', () => { if (root && root.querySelector('#mgrid')) { drawBig(); renderGrid(); } });
 
-  window.Market = { render, stop, reset, setCity, endDay, reload, useState, formatCoins, items: allItems, _state: () => ms };
+  window.Market = { render, stop, reset, setCity, endDay, reload, useState, formatCoins, items: allItems, visibleGoods, priceNow, magicPriceNow, openGood, openMagic, _state: () => ms };
 })();
