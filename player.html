@@ -13,12 +13,12 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Frindeval">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body class="locked">
   <!-- If anything breaks, show a red bar with the error so it can be sent to Claude -->
   <script>
-    window.APP_VERSION = '9';
+    window.APP_VERSION = '10';
     window.showAppError = function (msg) {
       var b = document.getElementById('appError');
       if (!b) { b = document.createElement('div'); b.id = 'appError'; b.className = 'app-error'; document.body.prepend(b); }
@@ -29,9 +29,10 @@
   </script>
 
   <header class="topbar">
-    <div class="brand"><img class="brand-ico" src="icons/favicon-64.png" alt="">Frindeval <span class="ver">v9</span></div>
+    <div class="brand"><img class="brand-ico" src="icons/favicon-64.png" alt="">Frindeval <span class="ver">v10</span></div>
     <nav class="tabs" id="tabs">
       <a href="#people" data-tab="people"><span class="ti">🧙</span><span class="tl">Known NPCs</span></a>
+      <a href="#char" data-tab="char"><span class="ti">🛡</span><span class="tl">My character</span></a>
       <a href="#maps" data-tab="maps"><span class="ti">🗺</span><span class="tl">Maps</span></a>
     </nav>
     <span id="who" class="small muted" style="margin-left:auto"></span>
@@ -41,10 +42,11 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
-  <script src="config.js?v=9"></script>
-  <script src="cloud.js?v=9"></script>
-  <script src="pwa.js?v=9"></script>
-  <script src="similar.js?v=9"></script>
-  <script src="player.js?v=9"></script>
+  <script src="config.js?v=10"></script>
+  <script src="cloud.js?v=10"></script>
+  <script src="pwa.js?v=10"></script>
+  <script src="similar.js?v=10"></script>
+  <script src="chartree.js?v=10"></script>
+  <script src="player.js?v=10"></script>
 </body>
 </html>

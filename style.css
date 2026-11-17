@@ -352,3 +352,18 @@ body.locked .tabs, body.locked .sync { display: none !important; }
 .seg { display: flex; gap: 4px; background: var(--field-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
 .seg .btn { flex: 1 1 0; border: none; background: transparent; }
 .seg .btn.on { background: var(--gold); color: var(--on-gold); }
+
+/* ---------- Characters & party pin ---------- */
+.party-pin { position: absolute; transform: translate(-30%, -90%); font-size: 28px; line-height: 1; color: #ff5a5a; text-shadow: 0 0 3px #000, 0 0 8px #000; pointer-events: none; z-index: 4; animation: pinPulse 1.6s ease-in-out infinite; }
+@keyframes pinPulse { 50% { transform: translate(-30%, -100%); } }
+.party-bar { background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.char-head { display: flex; gap: 14px; align-items: center; margin-bottom: 8px; }
+.char-sheet h3 { margin-top: 18px; }
+.char-tree { margin: 8px 0; padding: 8px; max-height: 60vh; }
+.list-row { margin: 8px 0; }
+.save-bar { position: sticky; bottom: 0; margin: 16px -16px -16px; padding: 12px 16px; background: linear-gradient(transparent, var(--panel) 30%); text-align: right; }
+@media (max-width: 800px) { .save-bar { bottom: calc(70px + env(safe-area-inset-bottom)); margin: 12px -12px -12px; } .save-bar .btn { width: 100%; } }
+.party-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 14px; }
+.party-card .members li { display: block; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.party-card .members li .btn, .party-card .members li a { margin-top: 4px; }
+.party-card details { margin-top: 8px; } .party-card summary { cursor: pointer; }

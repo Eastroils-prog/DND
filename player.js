@@ -17,7 +17,7 @@
   let toastTimer;
   const toast = (msg, html) => { const t = $('#toast'); if (html) t.innerHTML = msg; else t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 6000); };
 
-  let world = { npcs: [], factions: [], maps: [], owner: null }, notes = [], me = { name: '', isAdmin: false };
+  let world = { npcs: [], factions: [], maps: [], owner: null }, notes = [], pins = [], me = { name: '', isAdmin: false };
   const ui = { search: '', mapId: null, zoom: 100, adding: false };
 
   // ---------- login ----------
@@ -76,7 +76,9 @@
         maps: (Array.isArray(data.maps) ? data.maps : []).map(m => ({ id: String(m.id), name: String(m.name || 'Map'), src: safeMapSrc(m.src) })).filter(m => m.src),
       };
       notes = await C.listPlayerNpcs(world.owner);
-      if (!ui.adding) route();
+      pins = await C.listPartyPins(world.owner).catch(() => []);
+      if (!me.isAdmin && !ui.charLoaded) { const row = await C.myCharacter(world.owner).catch(() => null); ui.char = cleanChar(row && row.data); ui.charLoaded = true; ui.charSavedAt = row ? Date.parse(row.updated_at) : 0; }
+      if (!ui.adding && !ui.charDirty && !ui.placing) route();
     } catch (e) { toast('⚠️ Could not load: ' + e.message); }
   }
 
@@ -90,6 +92,7 @@
     const tab = (location.hash || '#people').slice(1);
     document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
     if (tab === 'maps') return renderMaps();
+    if (tab === 'char') return renderChar();
     renderPeople();
   }
 
@@ -216,20 +219,141 @@
     };
   }
 
-  // ---------- maps: pictures only ----------
+  // ---------- maps: pictures only + the party pin ----------
+  const ago = iso => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
   function renderMaps() {
     if (!world.maps.find(m => m.id === ui.mapId)) ui.mapId = world.maps.length ? world.maps[0].id : null;
     const m = world.maps.find(x => x.id === ui.mapId);
     if (!m) { app.innerHTML = '<div class="panel empty">No maps shared yet.</div>'; return; }
+    const pin = pins.find(p => p.map_id === m.id);
     app.innerHTML = `<div class="panel">
       <div class="row" style="justify-content:space-between">
-        <div class="cat-chips" style="margin:0">${world.maps.map(x => `<button class="btn small ${x.id === m.id ? 'on' : ''}" data-map="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>
+        <div class="cat-chips" style="margin:0">${world.maps.map(x => `<button class="btn small ${x.id === m.id ? 'on' : ''}" data-map="${esc(x.id)}">${esc(x.name)}${pins.some(p => p.map_id === x.id) ? ' ⚑' : ''}</button>`).join('')}</div>
         <span class="row" style="flex:0 1 auto;gap:4px">${[100, 150, 200, 300].map(z => `<button class="btn small ${z === ui.zoom ? 'on' : ''}" data-zoom="${z}">${z}%</button>`).join('')}</span>
       </div>
-      <div class="map-scroll" style="margin-top:10px"><div class="map-inner" style="width:${ui.zoom}%"><img src="${esc(m.src)}" alt="Map" draggable="false"></div></div>
+      <div class="row party-bar" style="margin-top:10px">
+        <span class="small" style="flex:1 1 200px">${pin ? `⚑ <b>The party is here</b> — set by ${esc(pin.set_by_name || 'someone')}, ${esc(ago(pin.updated_at))}` : '⚑ No party pin on this map yet.'}
+          ${ui.placing ? '<br><b>👆 Tap the map where the party is.</b>' : ''}</span>
+        <button class="btn small ${ui.placing ? 'on' : 'primary'}" id="placePin" style="flex:0">${ui.placing ? '✕ Cancel' : pin ? '⚑ Move party pin' : '⚑ Place party pin'}</button>
+        ${pin && !ui.placing ? '<button class="btn small" id="clearPin" style="flex:0">Remove</button>' : ''}
+      </div>
+      <div class="map-scroll" style="margin-top:10px"><div class="map-inner" style="width:${ui.zoom}%">
+        <img src="${esc(m.src)}" alt="Map" draggable="false" id="pmap" class="${ui.placing ? 'placing' : ''}">
+        ${pin ? `<div class="party-pin" style="left:${Number(pin.x)}%;top:${Number(pin.y)}%" title="The party is here">⚑</div>` : ''}
+      </div></div>
     </div>`;
-    app.querySelectorAll('[data-map]').forEach(b => b.onclick = () => { ui.mapId = b.dataset.map; renderMaps(); });
+    app.querySelectorAll('[data-map]').forEach(b => b.onclick = () => { ui.mapId = b.dataset.map; ui.placing = false; renderMaps(); });
     app.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => { ui.zoom = +b.dataset.zoom; renderMaps(); });
+    $('#placePin').onclick = () => { ui.placing = !ui.placing; renderMaps(); };
+    const cp = $('#clearPin'); if (cp) cp.onclick = async () => { try { await C.clearPartyPin(world.owner, m.id); pins = await C.listPartyPins(world.owner); renderMaps(); } catch (e) { toast('⚠️ ' + e.message); } };
+    $('#pmap').onclick = async e => {
+      if (!ui.placing) return;
+      const r = e.target.getBoundingClientRect();
+      const x = Math.round(((e.clientX - r.left) / r.width) * 1000) / 10, y = Math.round(((e.clientY - r.top) / r.height) * 1000) / 10;
+      try {
+        await C.setPartyPin(world.owner, m.id, Math.max(0, Math.min(100, x)), Math.max(0, Math.min(100, y)), me.name);
+        ui.placing = false; pins = await C.listPartyPins(world.owner); renderMaps(); toast('⚑ Party pin placed — everyone sees it now.');
+      } catch (err) { toast('⚠️ ' + err.message); }
+    };
+  }
+
+  // ---------- my character ----------
+  const RELATIONS = [['grandparent', 'Grandparent'], ['parent', 'Parent'], ['sibling', 'Sibling'], ['spouse', 'Partner / spouse'], ['child', 'Child'], ['other', 'Other family']];
+  const ALIGNS = ['', 'Lawful Good', 'Neutral Good', 'Chaotic Good', 'Lawful Neutral', 'True Neutral', 'Chaotic Neutral', 'Lawful Evil', 'Neutral Evil', 'Chaotic Evil'];
+  const rid = () => Math.random().toString(36).slice(2, 10);
+  const blankChar = () => ({ name: '', race: '', cls: '', level: '1', age: '', gender: '', alignment: '', appearance: '', personality: '', backstory: '', portrait: '', family: [], npcs: [] });
+  function cleanChar(d) {
+    const c = { ...blankChar(), ...(d && typeof d === 'object' ? d : {}) };
+    c.portrait = safeImg(c.portrait);
+    c.family = (Array.isArray(c.family) ? c.family : []).filter(f => f && typeof f === 'object').map(f => ({ id: f.id || rid(), relation: RELATIONS.some(([v]) => v === f.relation) ? f.relation : 'other', name: String(f.name || ''), race: String(f.race || ''), alive: f.alive !== false, notes: String(f.notes || '') }));
+    c.npcs = (Array.isArray(c.npcs) ? c.npcs : []).filter(n => n && typeof n === 'object').map(n => ({ id: n.id || rid(), name: String(n.name || ''), role: String(n.role || ''), race: String(n.race || ''), place: String(n.place || ''), description: String(n.description || '') }));
+    return c;
+  }
+  function readPortrait(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !file.type.startsWith('image/')) return reject(new Error('not an image'));
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => { const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const side = Math.min(img.width, img.height);
+        c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2.6, side, side, 0, 0, S, S); URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.8)); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); }; img.src = url;
+    });
+  }
+  function renderChar() {
+    if (me.isAdmin) { app.innerHTML = '<div class="panel empty">👑 You are the DM: see every character in the <b>🛡 Party</b> tab of the DM app.</div>'; return; }
+    const c = ui.char || (ui.char = blankChar());
+    const field = (k, label, ph = '', type = 'input') => type === 'input'
+      ? `<div><label>${label}</label><input data-f="${k}" maxlength="80" value="${esc(c[k])}" placeholder="${esc(ph)}"></div>`
+      : `<div><label>${label}</label><textarea data-f="${k}" maxlength="${k === 'backstory' ? 6000 : 2000}" placeholder="${esc(ph)}" ${k === 'backstory' ? 'style="min-height:180px"' : ''}>${esc(c[k])}</textarea></div>`;
+    app.innerHTML = `<div class="panel char-sheet">
+      <div class="char-head">
+        <label class="portrait" title="Tap to add a picture">${c.portrait ? `<img src="${esc(c.portrait)}" alt="">` : '<span>📷<br>Add<br>picture</span>'}<input type="file" id="charPic" accept="image/*" hidden></label>
+        <div style="flex:1;min-width:0"><h2 style="margin:0">${esc(c.name || 'My character')}</h2>
+          <div class="small muted">${esc([c.race, c.cls && c.cls + (c.level ? ' ' + c.level : ''), c.age && 'age ' + c.age].filter(Boolean).join(' · ') || 'Fill in your character below.')}</div>
+          <div class="small" id="saveState">${ui.charDirty ? '✏️ Not saved yet' : ui.charSavedAt ? '✅ Saved' : ''}</div></div>
+      </div>
+      <h3>📜 Basics</h3>
+      <div class="grid2">${field('name', 'Name *', 'e.g. Brynja Stormborn')}${field('race', 'Race', 'e.g. Half-Elf')}${field('cls', 'Class', 'e.g. Ranger')}${field('level', 'Level', '1')}${field('age', 'Age')}${field('gender', 'Gender')}
+        <div><label>Alignment</label><select data-f="alignment">${ALIGNS.map(a => `<option ${a === c.alignment ? 'selected' : ''} value="${esc(a)}">${esc(a || '—')}</option>`).join('')}</select></div></div>
+      ${field('appearance', 'Appearance', 'What do people notice first?', 'text')}
+      ${field('personality', 'Personality', 'Habits, fears, what they want…', 'text')}
+      <h3>📖 Backstory</h3>
+      ${field('backstory', 'Your story so far', 'Where are you from? Who raised you? What happened that made you leave home?', 'text')}
+      <div class="row" style="justify-content:flex-start"><button class="btn" id="aiStory" style="flex:0">🤖 Find family & people in my backstory</button></div>
+      <h3>🌳 Family</h3>
+      <div class="tree-wrap char-tree" id="charTree">${window.CharTree ? window.CharTree.svg(c) : ''}</div>
+      <div id="famList">${c.family.map((f, i) => `<div class="field-view list-row">
+        <div class="grid2">
+          <div><label>Relation</label><select data-fam="${i}" data-k="relation">${RELATIONS.map(([v, l]) => `<option value="${v}" ${v === f.relation ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+          <div><label>Name</label><input data-fam="${i}" data-k="name" maxlength="80" value="${esc(f.name)}"></div>
+          <div><label>Race</label><input data-fam="${i}" data-k="race" maxlength="40" value="${esc(f.race)}"></div>
+          <div><label class="check" style="margin-top:26px"><input type="checkbox" data-fam="${i}" data-k="alive" ${f.alive ? 'checked' : ''}> Still alive</label></div>
+        </div>
+        <div><label>Notes</label><input data-fam="${i}" data-k="notes" maxlength="300" value="${esc(f.notes)}"></div>
+        <button class="btn small danger" data-famdel="${i}">🗑 Remove</button></div>`).join('')}</div>
+      <button class="btn small" id="famAdd">+ Add family member</button>
+      <h3>👥 People from my past</h3>
+      <p class="small muted">Mentors, rivals, old friends, enemies… Your DM can bring them into the story.</p>
+      <div id="npcList2">${c.npcs.map((n, i) => `<div class="field-view list-row">
+        <div class="grid2">
+          <div><label>Name</label><input data-np="${i}" data-k="name" maxlength="80" value="${esc(n.name)}"></div>
+          <div><label>Who are they to you?</label><input data-np="${i}" data-k="role" maxlength="80" value="${esc(n.role)}" placeholder="e.g. old mentor"></div>
+          <div><label>Race</label><input data-np="${i}" data-k="race" maxlength="40" value="${esc(n.race)}"></div>
+          <div><label>Where?</label><input data-np="${i}" data-k="place" maxlength="80" value="${esc(n.place)}"></div>
+        </div>
+        <div><label>About them</label><textarea data-np="${i}" data-k="description" maxlength="1000" style="min-height:60px">${esc(n.description)}</textarea></div>
+        <button class="btn small danger" data-npdel="${i}">🗑 Remove</button></div>`).join('')}</div>
+      <button class="btn small" id="npAdd">+ Add a person</button>
+      <div class="save-bar"><button class="btn primary" id="charSave">💾 Save my character</button></div>
+    </div>`;
+    const dirty = () => { ui.charDirty = true; const s = $('#saveState'); if (s) s.textContent = '✏️ Not saved yet'; };
+    const tree = () => { const t = $('#charTree'); if (t && window.CharTree) t.innerHTML = window.CharTree.svg(c); };
+    app.querySelectorAll('[data-f]').forEach(el => el.oninput = el.onchange = () => { c[el.dataset.f] = el.value; dirty(); if (el.dataset.f === 'name') tree(); });
+    app.querySelectorAll('[data-fam]').forEach(el => el.oninput = el.onchange = () => { const f = c.family[+el.dataset.fam]; f[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; dirty(); tree(); });
+    app.querySelectorAll('[data-np]').forEach(el => el.oninput = () => { c.npcs[+el.dataset.np][el.dataset.k] = el.value; dirty(); });
+    app.querySelectorAll('[data-famdel]').forEach(b => b.onclick = () => { c.family.splice(+b.dataset.famdel, 1); dirty(); renderChar(); });
+    app.querySelectorAll('[data-npdel]').forEach(b => b.onclick = () => { c.npcs.splice(+b.dataset.npdel, 1); dirty(); renderChar(); });
+    $('#famAdd').onclick = () => { c.family.push({ id: rid(), relation: 'parent', name: '', race: c.race || '', alive: true, notes: '' }); dirty(); renderChar(); };
+    $('#npAdd').onclick = () => { c.npcs.push({ id: rid(), name: '', role: '', race: '', place: '', description: '' }); dirty(); renderChar(); };
+    $('#charPic').onchange = async e => { try { c.portrait = await readPortrait(e.target.files[0]); dirty(); renderChar(); } catch (err) { toast("⚠️ That file isn't a picture I can read."); } };
+    $('#charSave').onclick = async () => {
+      if (!c.name.trim()) return toast('Give your character a name first.');
+      c.family = c.family.filter(f => f.name.trim()); c.npcs = c.npcs.filter(n => n.name.trim());
+      try { await C.saveCharacter(world.owner, me.name, c); ui.charDirty = false; ui.charSavedAt = Date.now(); toast('💾 Saved! Your DM can see your character now.'); renderChar(); }
+      catch (err) { toast('⚠️ Could not save: ' + err.message); }
+    };
+    $('#aiStory').onclick = async () => {
+      const b = $('#aiStory'); b.disabled = true; b.textContent = '🧙 Reading your story…';
+      try {
+        const r = await C.ai({ mode: 'backstory', backstory: c.backstory, name: c.name, race: c.race, cls: c.cls, existing: [...c.family, ...c.npcs].map(x => x.name) });
+        const res = r.result || {}, have = new Set([...c.family, ...c.npcs].map(x => x.name.trim().toLowerCase()));
+        const fam = (res.family || []).filter(f => f.name && !have.has(f.name.trim().toLowerCase()));
+        const ppl = (res.npcs || []).filter(n => n.name && !have.has(n.name.trim().toLowerCase()));
+        fam.forEach(f => c.family.push({ id: rid(), relation: f.relation, name: f.name, race: f.race || '', alive: f.alive !== false, notes: f.notes || '' }));
+        ppl.forEach(n => c.npcs.push({ id: rid(), name: n.name, role: n.role || '', race: n.race || '', place: n.place || '', description: n.description || '' }));
+        if (fam.length || ppl.length) dirty();
+        renderChar(); toast(`🤖 Added ${fam.length} family member${fam.length === 1 ? '' : 's'} and ${ppl.length} ${ppl.length === 1 ? 'person' : 'people'}. Check them, change anything, then press Save.`);
+      } catch (err) { toast('⚠️ ' + err.message); b.disabled = false; b.textContent = '🤖 Find family & people in my backstory'; }
+    };
   }
 
   start();

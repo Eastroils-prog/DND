@@ -52,7 +52,7 @@
 
 3. Send each player their **username + password** privately, and the link: `https://eastroils-prog.github.io/DND/player.html`.
 
-**What players can do:** see the NPCs you mark **👁 Players have met**, **add NPCs they meet**, and **look at the maps**. That's all.
+**What players can do:** see the NPCs you mark **👁 Players have met**, **add NPCs they meet**, **make their own character** (backstory, family tree, people from their past), and **look at the maps** with the shared **⚑ party pin** (one per map — placing it again moves it). You see every character in the DM app's **🛡 Party** tab.
 - If a player adds someone who looks like a known NPC (similar name, same job…), it is **linked automatically** and shows as a 📝 note on that NPC's card. They can press "✂️ Not the same person" if it's wrong.
 - You see every player addition in **🧙 NPCs → 📝 From players**, with suggestions (including your secret NPCs, which players never see). Link it, or press **➕ Add as new NPC**.
 - Maps show **no pins and no place names** from the app. Your map pictures have names painted in — in **🗺 Maps**, use **🎭 Add player version (no names)** to upload a version without labels (Inkarnate can export without text). Players then see that one.
@@ -63,10 +63,13 @@
 - When you share new NPCs or maps, players' phones get a notification automatically. You can also send your own message in **☁️ Cloud & Backup → 📣 Message your players**.
 - Behind the scenes: the `notify-players` Edge Function and the secrets `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` in Supabase (already installed).
 
-## Step 7 (optional): the AI helper 🤖
-1. Get a Claude API key at **console.anthropic.com** (add a little credit, e.g. $5; set a monthly limit under **Limits**).
-2. Supabase → Edge Functions → new function named **`generate-npc`** → paste `supabase/functions/generate-npc/index.ts` → Deploy.
-3. Supabase → **Edge Functions → Secrets**: add `ANTHROPIC_API_KEY` = your `sk-ant-…` key and `ALLOWED_EMAILS` = `admin@frindeval.app`.
+## Step 7: switch on the AI helper 🤖 (one secret to add)
+The AI helper (`generate-npc`) is already installed, and your admin account (plus your players) may use it.
+It only needs your Claude API key — a secret, so you add it yourself:
+1. **console.anthropic.com** → sign up → **Billing**: add a little credit (e.g. $5) → **Limits**: set a monthly limit.
+2. **API Keys → Create Key** → copy it (starts with `sk-ant-`). Never paste it in chat or on GitHub.
+3. Supabase → **Edge Functions → Secrets → Add new secret**: Name `ANTHROPIC_API_KEY`, Value: your key → **Save**.
+4. Done: **🤖 AI NPC** (DM app) and **🤖 Find family & people in my backstory** (players' 🛡 My character) now work. Each use costs a few cents.
 
 ---
 

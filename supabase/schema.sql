@@ -138,3 +138,46 @@ drop policy if exists "manage own subscriptions" on public.push_subscriptions;
 create policy "manage own subscriptions" on public.push_subscriptions for all to authenticated
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()) and (owner = (select auth.uid()) or exists (select 1 from public.members m where m.user_id = (select auth.uid()) and m.owner = push_subscriptions.owner)));
+
+-- =========================================================
+-- PART 4 — Player characters and the party pin
+-- =========================================================
+-- One character per player (backstory, family, people from their past). Only the player and the admin can read it.
+create table if not exists public.player_characters (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users (id) on delete cascade,   -- whose world
+  player      uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  player_name text not null default '' check (char_length(player_name) <= 60),
+  data        jsonb not null default '{}'::jsonb check (pg_column_size(data) < 600000),
+  updated_at  timestamptz not null default now(),
+  unique (owner, player)
+);
+alter table public.player_characters enable row level security;
+drop policy if exists "player or admin can read" on public.player_characters;
+drop policy if exists "player creates own" on public.player_characters;
+drop policy if exists "player edits own" on public.player_characters;
+drop policy if exists "player or admin can delete" on public.player_characters;
+create policy "player or admin can read" on public.player_characters for select to authenticated
+  using (player = (select auth.uid()) or owner = (select auth.uid()));
+create policy "player creates own" on public.player_characters for insert to authenticated
+  with check (player = (select auth.uid()) and exists (select 1 from public.members m where m.user_id = (select auth.uid()) and m.owner = player_characters.owner and m.role = 'player'));
+create policy "player edits own" on public.player_characters for update to authenticated
+  using (player = (select auth.uid())) with check (player = (select auth.uid()));
+create policy "player or admin can delete" on public.player_characters for delete to authenticated
+  using (player = (select auth.uid()) or owner = (select auth.uid()));
+
+-- Where is the party? One pin per map; placing it again moves it.
+create table if not exists public.party_pins (
+  owner       uuid not null references auth.users (id) on delete cascade,
+  map_id      text not null check (char_length(map_id) <= 60),
+  x           real not null check (x >= 0 and x <= 100),
+  y           real not null check (y >= 0 and y <= 100),
+  set_by_name text not null default '' check (char_length(set_by_name) <= 60),
+  updated_at  timestamptz not null default now(),
+  primary key (owner, map_id)
+);
+alter table public.party_pins enable row level security;
+drop policy if exists "the whole table can use the party pin" on public.party_pins;
+create policy "the whole table can use the party pin" on public.party_pins for all to authenticated
+  using (owner = (select auth.uid()) or exists (select 1 from public.members m where m.user_id = (select auth.uid()) and m.owner = party_pins.owner))
+  with check (owner = (select auth.uid()) or exists (select 1 from public.members m where m.user_id = (select auth.uid()) and m.owner = party_pins.owner));
