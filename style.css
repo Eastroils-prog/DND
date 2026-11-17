@@ -367,3 +367,21 @@ body.locked .tabs, body.locked .sync { display: none !important; }
 .party-card .members li { display: block; padding: 6px 0; border-bottom: 1px dashed var(--line); }
 .party-card .members li .btn, .party-card .members li a { margin-top: 4px; }
 .party-card details { margin-top: 8px; } .party-card summary { cursor: pointer; }
+
+/* ---------- Search ---------- */
+body.locked .search-btn { display: none !important; }
+.search-modal { padding-top: 6vh; }
+.search-card { max-width: 720px; padding: 12px; }
+.search-bar { display: flex; gap: 8px; align-items: center; }
+.search-bar input { flex: 1; font-size: 1.05rem; padding: 12px 14px; }
+.sfilters { margin: 10px 0 4px; }
+.sresults { max-height: 60vh; overflow: auto; margin-top: 8px; }
+.sgroup { margin-bottom: 10px; } .sgh { margin: 6px 4px; }
+.sres { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 10px;
+  color: var(--text); padding: 8px 10px; cursor: pointer; font: inherit; }
+.sres:hover, .sres:focus { background: var(--panel-2); border-color: var(--line); outline: none; }
+.sico { font-size: 1.2rem; width: 26px; text-align: center; flex: 0 0 auto; }
+.stxt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sanswer { margin-top: 10px; border-color: var(--gold-dim); }
+.search-btn { flex: 0 0 auto; }
+@media (max-width: 800px) { .search-btn .tl { display: none; } .search-modal { padding: 8px; } .sresults { max-height: 65vh; } }
